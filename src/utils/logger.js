@@ -211,7 +211,15 @@ class Logger {
         const message = args.map(arg => {
             if (typeof arg === 'object') {
                 try {
-                    return JSON.stringify(arg, null, 2);
+                    return JSON.stringify(arg, (_key, value) => {
+                        // 将 Buffer 对象解码为可读字符串
+                        if (value && value.type === 'Buffer' && Array.isArray(value.data)) {
+                            const slice = value.data.length > 2048 ? value.data.slice(0, 2048) : value.data;
+                            const decoded = Buffer.from(slice).toString('utf8');
+                            return decoded.length > 500 ? decoded.substring(0, 500) + '...[truncated]' : decoded;
+                        }
+                        return value;
+                    }, 2);
                 } catch (e) {
                     return String(arg);
                 }

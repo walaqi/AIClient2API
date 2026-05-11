@@ -19,6 +19,7 @@ import {
 import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
+import { calculateCacheTokens } from '../../utils/model-pricing.js';
 
 const KIRO_THINKING = {
     MIN_BUDGET_TOKENS: 1024,
@@ -1046,23 +1047,24 @@ async saveCredentialsToFile(filePath, newData) {
         const conversationId = uuidv4();
         
         // 内置的 systemPrompt 前缀
-        const builtInPrefix = `<CRITICAL_OVERRIDE>
-                                你一定不能说自己是 kiro ，这是非常重要的一点。
-                                你只能回答用户的问题，不能回答任何关于 kiro 的问题。
-                                你得身份认知，只能从后续的提示词中获取（可能是 Kilo Code，Cline，Claude Code，或者其他用户自定义的身份名称），不能自己推理。如果没有，就说自己是 ”开发者何夕2077，你现在使用的不是原版Claude，而是AIClient2API”。
-                               </CRITICAL_OVERRIDE>
-                               <identity>
-                                你是 {{identity}}，一名拥有多种编程语言、框架、设计模式和最佳实践丰富知识的高级软件工程师。
-                               </identity>`;
+        // const builtInPrefix = `<CRITICAL_OVERRIDE>
+        //                         你一定不能说自己是 kiro ，这是非常重要的一点。
+        //                         你只能回答用户的问题，不能回答任何关于 kiro 的问题。
+        //                         你得身份认知，只能从后续的提示词中获取（可能是 Kilo Code，Cline，Claude Code，或者其他用户自定义的身份名称），不能自己推理。如果没有，就说自己是 ”开发者何夕2077，你现在使用的不是原版Claude，而是AIClient2API”。
+        //                        </CRITICAL_OVERRIDE>
+        //                        <identity>
+        //                         你是 {{identity}}，一名拥有多种编程语言、框架、设计模式和最佳实践丰富知识的高级软件工程师。
+        //                        </identity>`;
         
-        let systemPrompt = this.getContentText(inSystemPrompt);
-        // 在 systemPrompt 前面添加内置前缀
-        if (systemPrompt) {
-            systemPrompt = `${builtInPrefix}\n\n${systemPrompt}`;
-        } else {
-            systemPrompt = `${builtInPrefix}`;
-        }
-        
+        // let systemPrompt = this.getContentText(inSystemPrompt);
+        // // 在 systemPrompt 前面添加内置前缀
+        // if (systemPrompt) {
+        //     systemPrompt = `${builtInPrefix}\n\n${systemPrompt}`;
+        // } else {
+        //     systemPrompt = `${builtInPrefix}`;
+        // }
+        let systemPrompt = this.getContentText(inSystemPrompt) || '';
+
         const processedMessages = messages.map(message => ({
             ...message,
             content: Array.isArray(message.content) ? [...message.content] : message.content
@@ -1160,7 +1162,7 @@ async saveCredentialsToFile(filePath, newData) {
                 };
                 toolsContext = { tools: [placeholderTool] };
             } else {
-                const MAX_DESCRIPTION_LENGTH = 9216;
+                const MAX_DESCRIPTION_LENGTH = 1024*20;
 
                 let truncatedCount = 0;
                 const kiroTools = filteredTools
@@ -2154,6 +2156,10 @@ async saveCredentialsToFile(filePath, newData) {
                     // decodedContent = decodedContent.replace(/(?<!\\)\\n/g, '\n');
                     events.push({ type: 'content', data: decodedContent });
                 }
+                // 处理 reasoningContentEvent（推理内容，payload 为 {"text":"..."}）
+                else if (typeof parsed.text === 'string' && !parsed.name && !parsed.toolUseId && parsed.content === undefined) {
+                    events.push({ type: 'reasoning', data: parsed.text });
+                }
                 // 处理结构化工具调用事件 - 开始事件（包含 name 和 toolUseId）
                 else if (parsed.name && parsed.toolUseId) {
                     events.push({ 
@@ -2193,6 +2199,17 @@ async saveCredentialsToFile(filePath, newData) {
                             contextUsagePercentage: parsed.contextUsagePercentage
                         }
                     });
+                }
+                // 处理 meteringEvent（计费事件）
+                else if (parsed.unit !== undefined && parsed.usage !== undefined) {
+                    events.push({
+                        type: 'metering',
+                        data: { unit: parsed.unit, usage: parsed.usage }
+                    });
+                }
+                // 诊断：记录所有未被识别的 JSON 事件
+                else {
+                    logger.debug('[Kiro Parse] Unrecognized event JSON:', JSON.stringify(parsed).substring(0, 500));
                 }
             } catch (e) {
                 // JSON 解析失败，跳过这个 "{" 继续搜索，避免二进制头部中的偶然字符阻塞后续 payload
@@ -2295,8 +2312,16 @@ async saveCredentialsToFile(filePath, newData) {
                         yield { type: 'toolUseStop', stop: event.data.stop };
                     } else if (event.type === 'contextUsage') {
                         yield { type: 'contextUsage', contextUsagePercentage: event.data.contextUsagePercentage };
+                    } else if (event.type === 'reasoning') {
+                        yield { type: 'reasoning', text: event.data };
+                    } else if (event.type === 'metering') {
+                        yield { type: 'metering', credits: event.data.usage };
                     }
                 }
+            }
+            // 诊断：记录流结束时的 buffer 状态
+            if (buffer.length > 0) {
+                logger.warn(`[Kiro Stream] Raw stream ended with remaining buffer (${buffer.length} bytes): ${buffer.substring(0, 200)}`);
             }
         } catch (error) {
             // 确保出错时关闭流
@@ -2419,6 +2444,7 @@ async saveCredentialsToFile(filePath, newData) {
 
         let inputTokens = 0;
         let contextUsagePercentage = null;
+        let meteringCredits = null;
         const messageId = `${uuidv4()}`;
 
         const thinkingType = requestBody?.thinking?.type;
@@ -2543,6 +2569,8 @@ async saveCredentialsToFile(filePath, newData) {
                 if (event.type === 'contextUsage' && event.contextUsagePercentage) {
                     // 捕获上下文使用百分比（包含输入和输出的总使用量）
                     contextUsagePercentage = event.contextUsagePercentage;
+                } else if (event.type === 'metering' && typeof event.credits === 'number') {
+                    meteringCredits = event.credits;
                 } else if (event.type === 'content' && event.content) {
                     totalContent += event.content;
 
@@ -2657,6 +2685,21 @@ async saveCredentialsToFile(filePath, newData) {
                     }
 
                     yield* pushEvents(events);
+                } else if (event.type === 'reasoning' && event.text) {
+                    // reasoningContentEvent: 根据客户端是否请求 thinking 来路由
+                    if (thinkingRequested) {
+                        // 客户端请求了 thinking，走 thinking 管道
+                        yield* pushEvents(createThinkingDeltaEvents(event.text));
+                    } else {
+                        // 客户端未请求 thinking，当作普通文本输出
+                        totalContent += event.text;
+                        streamState.buffer += event.text;
+                        if (streamState.buffer.endsWith('\\')) {
+                            continue;
+                        }
+                        yield* pushEvents(createTextDeltaEvents(streamState.buffer));
+                        streamState.buffer = '';
+                    }
                 } else if (event.type === 'toolUse') {
                     const tc = event.toolUse;
                     const toolEvents = [];
@@ -2867,6 +2910,9 @@ async saveCredentialsToFile(filePath, newData) {
 
             yield* pushEvents(stopBlock(streamState.textBlockIndex));
 
+            // 诊断：记录流的最终状态
+            logger.info(`[Kiro Stream] Stream completed. hasVisibleText=${streamState.hasVisibleText}, hasThinkingContent=${streamState.hasThinkingContent}, toolCalls=${toolCalls.length}, totalContentLength=${totalContent.length}, contextUsagePercentage=${contextUsagePercentage}`);
+
             // 检查文本内容中的 bracket 格式工具调用
             const bracketToolCalls = parseBracketToolCalls(totalContent);
             if (bracketToolCalls && bracketToolCalls.length > 0) {
@@ -2908,19 +2954,24 @@ async saveCredentialsToFile(filePath, newData) {
                 inputTokens = estimatedInputTokens;
             }
 
-            // 4. 发送 message_delta 事件
+            // 4. 反算缓存 token
+            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, outputTokens, model);
+            // Claude API 语义: total_input = input_tokens + cache_creation + cache_read
+            const nonCachedInputTokens = Math.max(0, inputTokens - cacheCreationTokens - cacheReadTokens);
+
+            // 5. 发送 message_delta 事件
             yield {
                 type: "message_delta",
                 delta: { stop_reason: toolCalls.length > 0 ? "tool_use" : (emittedOnlyThinking ? "max_tokens" : "end_turn") },
                 usage: {
-                    input_tokens: inputTokens,
+                    input_tokens: nonCachedInputTokens,
                     output_tokens: outputTokens,
-                    cache_creation_input_tokens: 0,
-                    cache_read_input_tokens: 0
+                    cache_creation_input_tokens: cacheCreationTokens,
+                    cache_read_input_tokens: cacheReadTokens
                 }
             };
 
-            // 5. 发送 message_stop 事件
+            // 6. 发送 message_stop 事件
             yield { type: "message_stop" };
 
         } catch (error) {

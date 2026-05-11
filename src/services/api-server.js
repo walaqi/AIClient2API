@@ -8,6 +8,7 @@ import { createRequestHandler } from '../handlers/request-handler.js';
 import { discoverPlugins, getPluginManager } from '../core/plugin-manager.js';
 import { getTLSSidecar } from '../utils/tls-sidecar.js';
 import { HEALTH_CHECK } from '../utils/constants.js';
+import { loadModelPrices, refreshIfNeeded } from '../utils/model-pricing.js';
 
 /**
  * @license
@@ -408,6 +409,7 @@ async function startServer() {
                     isHealthCheckRunning = true;
                     try {
                         await poolManager.performHealthChecks();
+                        await refreshIfNeeded();
                     } catch (error) {
                         logger.error('[ScheduledHealthCheck] Error:', error);
                     } finally {
@@ -453,6 +455,9 @@ async function startServer() {
                 globalThis._activeHealthCheckInterval = activeInterval;
             }
         }
+
+        // 启动时加载模型价格数据（独立于健康检查配置）
+        loadModelPrices().catch(err => logger.warn('[Model Pricing] Startup load error:', err.message));
 
         // 如果是子进程，通知主进程已就绪
         if (IS_WORKER_PROCESS) {
