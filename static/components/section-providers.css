@@ -940,6 +940,22 @@
     grid-column: 1 / -1;
 }
 
+.config-item-full {
+    grid-column: 1 / -1;
+}
+
+.config-item-full textarea {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 12px;
+    resize: vertical;
+    min-height: 80px;
+}
+
+.config-item textarea[readonly] {
+    background: var(--neutral-100);
+    cursor: default;
+}
+
 /* 无提供商提示 */
 .no-providers {
     text-align: center;

@@ -83,7 +83,7 @@ export class GrokApiService {
         this.uuid = config.uuid;
         this.token = config.GROK_COOKIE_TOKEN;
         this.cfClearance = config.GROK_CF_CLEARANCE;
-        this.userAgent = config.GROK_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
+        this.userAgent = config.GROK_USER_AGENT || config.ACCOUNT_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
         this.baseUrl = config.GROK_BASE_URL || 'https://grok.com';
         this.chatApi = `${this.baseUrl}/rest/app-chat/conversations/new`;
         this.isInitialized = false;
@@ -399,6 +399,15 @@ export class GrokApiService {
         if (ssoToken.startsWith("sso=")) ssoToken = ssoToken.substring(4);
         const cookie = ssoToken ? [`sso=${ssoToken}`, `sso-rw=${ssoToken}`] : [];
         if (this.cfClearance) cookie.push(`cf_clearance=${this.cfClearance}`);
+
+        const cfg = this.config;
+        const secChUa = cfg.ACCOUNT_SEC_CH_UA || '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"';
+        const secChUaFullVersion = cfg.ACCOUNT_SEC_CH_UA_FULL_VERSION || '143.0.7499.110';
+        const secChUaFullVersionList = cfg.ACCOUNT_SEC_CH_UA_FULL_VERSION_LIST || '"Google Chrome";v="143.0.7499.110", "Chromium";v="143.0.7499.110", "Not A(Brand";v="24.0.0.0"';
+        const platform = cfg.ACCOUNT_PLATFORM || 'Windows';
+        const platformVersion = cfg.ACCOUNT_PLATFORM_VERSION || '19.0.0';
+        const arch = platform === 'macOS' ? '"arm"' : '"x86"';
+
         return {
             'accept': '*/*',
             'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8,ja;q=0.7',
@@ -407,15 +416,15 @@ export class GrokApiService {
             'origin': this.baseUrl,
             'priority': 'u=1, i',
             'referer': `${this.baseUrl}/`,
-            'sec-ch-ua': '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
-            'sec-ch-ua-arch': '"x86"',
+            'sec-ch-ua': secChUa,
+            'sec-ch-ua-arch': arch,
             'sec-ch-ua-bitness': '"64"',
-            'sec-ch-ua-full-version': '"143.0.7499.110"',
-            'sec-ch-ua-full-version-list': '"Google Chrome";v="143.0.7499.110", "Chromium";v="143.0.7499.110", "Not A(Brand";v="24.0.0.0"',
+            'sec-ch-ua-full-version': `"${secChUaFullVersion}"`,
+            'sec-ch-ua-full-version-list': secChUaFullVersionList,
             'sec-ch-ua-mobile': '?0',
             'sec-ch-ua-model': '""',
-            'sec-ch-ua-platform': '"Windows"',
-            'sec-ch-ua-platform-version': '"19.0.0"',
+            'sec-ch-ua-platform': `"${platform}"`,
+            'sec-ch-ua-platform-version': `"${platformVersion}"`,
             'sec-fetch-dest': 'empty',
             'sec-fetch-mode': 'cors',
             'sec-fetch-site': 'same-origin',

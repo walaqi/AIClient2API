@@ -220,7 +220,8 @@ function getFieldLabel(key) {
         'FORWARD_HEADER_VALUE_PREFIX': t('modal.provider.field.headerPrefix'),
         'USE_SYSTEM_PROXY_FORWARD': t('modal.provider.field.useSystemProxy'),
         'ACCOUNT_PROXY_URL': t('modal.provider.field.accountProxyUrl'),
-        'ACCOUNT_PROXY_DISABLED': t('modal.provider.field.accountProxyDisabled')
+        'ACCOUNT_PROXY_DISABLED': t('modal.provider.field.accountProxyDisabled'),
+        'ACCOUNT_FINGERPRINT_JSON': t('modal.provider.field.accountFingerprint') || '浏览器指纹 (JSON)'
     };
     
     return labelMap[key] || key;
@@ -245,6 +246,21 @@ function getProviderTypeFields(providerType) {
             label: `${t('modal.provider.field.accountProxyDisabled')} <span class="optional-tag">${t('config.optional')}</span>`,
             type: 'boolean',
             placeholder: ''
+        }
+    ];
+
+    const accountFingerprintFields = [
+        {
+            id: 'ACCOUNT_FINGERPRINT_JSON',
+            label: `${t('modal.provider.field.accountFingerprint') || '浏览器指纹 (JSON)'} <span class="optional-tag">${t('config.optional')}</span>`,
+            type: 'json',
+            placeholder: '{"ACCOUNT_TLS_PROFILE":"HelloChrome_131","ACCOUNT_USER_AGENT":"..."}',
+            jsonKeys: [
+                'ACCOUNT_TLS_PROFILE', 'ACCOUNT_USER_AGENT', 'ACCOUNT_BROWSER_VERSION',
+                'ACCOUNT_PLATFORM', 'ACCOUNT_PLATFORM_VERSION',
+                'ACCOUNT_SEC_CH_UA', 'ACCOUNT_SEC_CH_UA_FULL_VERSION',
+                'ACCOUNT_SEC_CH_UA_FULL_VERSION_LIST', 'ACCOUNT_FINGERPRINT_GENERATION'
+            ]
         }
     ];
 
@@ -311,7 +327,8 @@ function getProviderTypeFields(providerType) {
                 type: 'text',
                 placeholder: 'https://cloudcode-pa.googleapis.com'
             },
-            ...accountProxyFields
+            ...accountProxyFields,
+            ...accountFingerprintFields
         ],
         'claude-kiro-oauth': [
             {
@@ -338,7 +355,8 @@ function getProviderTypeFields(providerType) {
                 type: 'text',
                 placeholder: 'https://oidc.{{region}}.amazonaws.com/token'
             },
-            ...accountProxyFields
+            ...accountProxyFields,
+            ...accountFingerprintFields
         ],
         'openai-qwen-oauth': [
             {
@@ -359,7 +377,8 @@ function getProviderTypeFields(providerType) {
                 type: 'text',
                 placeholder: 'https://chat.qwen.ai'
             },
-            ...accountProxyFields
+            ...accountProxyFields,
+            ...accountFingerprintFields
         ],
         'gemini-antigravity': [
             {
@@ -386,7 +405,8 @@ function getProviderTypeFields(providerType) {
                 type: 'text',
                 placeholder: 'https://autopush-cloudcode-pa.sandbox.googleapis.com'
             },
-            ...accountProxyFields
+            ...accountProxyFields,
+            ...accountFingerprintFields
         ],
         'openai-iflow': [
             {
@@ -401,7 +421,8 @@ function getProviderTypeFields(providerType) {
                 type: 'text',
                 placeholder: 'https://iflow.cn/api'
             },
-            ...accountProxyFields
+            ...accountProxyFields,
+            ...accountFingerprintFields
         ],
         'openai-codex-oauth': [
             {
@@ -422,7 +443,8 @@ function getProviderTypeFields(providerType) {
                 type: 'text',
                 placeholder: 'https://api.openai.com/v1/codex'
             },
-            ...accountProxyFields
+            ...accountProxyFields,
+            ...accountFingerprintFields
         ],
         'grok-web': [
             {
@@ -449,7 +471,8 @@ function getProviderTypeFields(providerType) {
                 type: 'text',
                 placeholder: 'https://grok.com'
             },
-            ...accountProxyFields
+            ...accountProxyFields,
+            ...accountFingerprintFields
         ],
         'forward-api': [
             {

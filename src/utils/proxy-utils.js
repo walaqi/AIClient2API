@@ -191,8 +191,15 @@ export function isTLSSidecarEnabledForProvider(config, providerType) {
 export function configureTLSSidecar(axiosConfig, config, providerType, defaultBaseUrl = null) {
     const sidecar = getTLSSidecar();
     if (sidecar.isReady() && isTLSSidecarEnabledForProvider(config, providerType)) {
-        const proxyUrl = config.TLS_SIDECAR_PROXY_URL || null;
-        
+        // 代理优先级：ACCOUNT_PROXY_URL > TLS_SIDECAR_PROXY_URL > null
+        let proxyUrl = null;
+        if (!config.ACCOUNT_PROXY_DISABLED) {
+            proxyUrl = config.ACCOUNT_PROXY_URL?.trim() || config.TLS_SIDECAR_PROXY_URL || null;
+        }
+
+        // TLS 指纹 profile（从账号指纹配置读取）
+        const tlsProfile = config.ACCOUNT_TLS_PROFILE || null;
+
         // 处理相对路径
         if (axiosConfig.url && !axiosConfig.url.startsWith('http')) {
             const baseUrl = (axiosConfig.baseURL || defaultBaseUrl || '').replace(/\/$/, '');
@@ -201,8 +208,8 @@ export function configureTLSSidecar(axiosConfig, config, providerType, defaultBa
                 axiosConfig.url = baseUrl + path;
             }
         }
-        
-        sidecar.wrapAxiosConfig(axiosConfig, proxyUrl);
+
+        sidecar.wrapAxiosConfig(axiosConfig, { proxyUrl, tlsProfile });
     }
     return axiosConfig;
 }

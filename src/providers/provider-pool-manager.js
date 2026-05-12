@@ -13,6 +13,7 @@ import {
 } from './provider-models.js';
 import { broadcastEvent } from '../ui-modules/event-broadcast.js';
 import { ENDPOINT_TYPE } from '../utils/common.js';
+import { generateFingerprint, hasFingerprint } from '../utils/fingerprint-generator.js';
 
 function getCustomModelAliasesForProvider(config, providerType) {
     const customModels = Array.isArray(config?.customModels) ? config.customModels : [];
@@ -841,6 +842,9 @@ export class ProviderPoolManager {
                     providerConfig.lastErrorMessage = providerConfig.lastErrorMessage || null;
                     providerConfig.customName = providerConfig.customName || null;
 
+                    // 确保账号有浏览器指纹（懒加载：首次启动时自动生成）
+                    this._ensureFingerprint(providerConfig, providerType);
+
                     this.providerStatus[providerType].push({
                         config: providerConfig,
                         uuid: providerConfig.uuid, // Still keep uuid at the top level for easy access
@@ -860,6 +864,13 @@ export class ProviderPoolManager {
             this._debouncedSave(providerType);
         }
         this._log('info', `Initialized provider statuses: ok (maxErrorCount: ${this.maxErrorCount})`);
+    }
+
+    _ensureFingerprint(providerConfig, providerType) {
+        if (hasFingerprint(providerConfig) || !providerConfig.uuid) return;
+        const generation = providerConfig.ACCOUNT_FINGERPRINT_GENERATION || 0;
+        const fp = generateFingerprint(providerConfig.uuid, providerType, generation);
+        Object.assign(providerConfig, fp);
     }
 
     /**

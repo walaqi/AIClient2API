@@ -172,32 +172,34 @@ class TLSSidecar {
     /**
      * 为 axios 配置 sidecar 代理
      * 将目标 URL 改为 sidecar 地址，原始目标通过 header 传递
-     * 
+     *
      * @param {Object} axiosConfig - axios 配置对象
-     * @param {string} [proxyUrl] - 上游代理 URL（可选）
+     * @param {Object} [options] - 选项
+     * @param {string} [options.proxyUrl] - 上游代理 URL
+     * @param {string} [options.tlsProfile] - TLS 指纹 profile 名称
      * @returns {Object} 修改后的 axios 配置
      */
-    wrapAxiosConfig(axiosConfig, proxyUrl) {
+    wrapAxiosConfig(axiosConfig, options = {}) {
         if (!this.isReady()) {
-            return axiosConfig; // sidecar 不可用，原样返回
+            return axiosConfig;
         }
 
+        const { proxyUrl, tlsProfile } = options;
         const targetUrl = axiosConfig.url;
 
-        // 将请求指向 sidecar
         axiosConfig.url = this.baseUrl;
 
-        // 通过 header 传递目标和代理信息
         axiosConfig.headers = axiosConfig.headers || {};
         axiosConfig.headers['X-Target-Url'] = targetUrl;
         if (proxyUrl) {
             axiosConfig.headers['X-Proxy-Url'] = proxyUrl;
         }
+        if (tlsProfile) {
+            axiosConfig.headers['X-Tls-Profile'] = tlsProfile;
+        }
 
-        // 走 sidecar 不需要 Node.js 侧的 TLS agent
         delete axiosConfig.httpAgent;
         delete axiosConfig.httpsAgent;
-        // 确保 axios 不使用自己的代理
         axiosConfig.proxy = false;
 
         return axiosConfig;

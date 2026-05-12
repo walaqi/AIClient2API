@@ -348,7 +348,17 @@ export function createProviderConfig(options) {
         lastHealthCheckModel: null,
         lastErrorMessage: null,
         ACCOUNT_PROXY_URL: '',
-        ACCOUNT_PROXY_DISABLED: false
+        ACCOUNT_PROXY_DISABLED: false,
+        // 浏览器指纹字段（由 fingerprint-generator 自动填充）
+        ACCOUNT_TLS_PROFILE: '',
+        ACCOUNT_USER_AGENT: '',
+        ACCOUNT_BROWSER_VERSION: '',
+        ACCOUNT_PLATFORM: '',
+        ACCOUNT_PLATFORM_VERSION: '',
+        ACCOUNT_SEC_CH_UA: '',
+        ACCOUNT_SEC_CH_UA_FULL_VERSION: '',
+        ACCOUNT_SEC_CH_UA_FULL_VERSION_LIST: '',
+        ACCOUNT_FINGERPRINT_GENERATION: 0
     };
     
     // 如果需要 PROJECT_ID，添加空字符串占位

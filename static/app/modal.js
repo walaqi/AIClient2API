@@ -129,6 +129,7 @@ function renderSupportedModelsSection(provider) {
 function collectDraftProviderConfig(providerDetail, providerType, uuid) {
     const configInputs = providerDetail.querySelectorAll('input[data-config-key]');
     const configSelects = providerDetail.querySelectorAll('select[data-config-key]');
+    const configTextareas = providerDetail.querySelectorAll('textarea[data-config-key]');
     const providerConfig = {};
 
     configInputs.forEach(input => {
@@ -143,6 +144,23 @@ function collectDraftProviderConfig(providerDetail, providerType, uuid) {
     configSelects.forEach(select => {
         const key = select.dataset.configKey;
         providerConfig[key] = select.value === 'true';
+    });
+
+    configTextareas.forEach(textarea => {
+        const jsonKeysAttr = textarea.dataset.jsonKeys;
+        if (jsonKeysAttr) {
+            try {
+                const parsed = JSON.parse(textarea.value || '{}');
+                const allowedKeys = jsonKeysAttr.split(',');
+                for (const k of allowedKeys) {
+                    if (parsed[k] !== undefined) {
+                        providerConfig[k] = parsed[k];
+                    }
+                }
+            } catch (e) {
+                // JSON 解析失败时忽略
+            }
+        }
     });
 
     if (usesManagedModelList(providerType)) {
@@ -1229,7 +1247,31 @@ function renderProviderConfig(provider) {
         
         html += '</div>';
     }
-    
+
+    // 渲染浏览器指纹 JSON textarea（如果字段定义中包含 json 类型）
+    const jsonFieldDef = fieldConfigs.find(f => f.type === 'json');
+    if (jsonFieldDef) {
+        const jsonKeys = jsonFieldDef.jsonKeys || [];
+        const jsonObj = {};
+        jsonKeys.forEach(k => {
+            if (provider[k] !== undefined && provider[k] !== '') {
+                jsonObj[k] = provider[k];
+            }
+        });
+        const jsonValue = Object.keys(jsonObj).length > 0 ? JSON.stringify(jsonObj, null, 2) : '';
+        html += `
+            <div class="form-grid">
+                <div class="config-item config-item-full">
+                    <label>${jsonFieldDef.label}</label>
+                    <textarea data-config-key="${jsonFieldDef.id}"
+                              data-json-keys="${jsonKeys.join(',')}"
+                              rows="4" readonly
+                              placeholder='${jsonFieldDef.placeholder || ''}'>${escapeHtml(jsonValue)}</textarea>
+                </div>
+            </div>
+        `;
+    }
+
     // 添加 notSupportedModels 配置区域
     if (usesManagedModelList(currentProviderType)) {
         html += '<div class="form-grid full-width">';
@@ -1275,7 +1317,12 @@ function getFieldOrder(provider) {
         'isHealthy', 'lastUsed', 'usageCount', 'errorCount', 'lastErrorTime',
         'uuid', 'isDisabled', 'lastHealthCheckTime', 'lastHealthCheckModel', 'lastErrorMessage',
         'notSupportedModels', 'supportedModels', 'refreshCount', 'needsRefresh', '_lastSelectionSeq',
-        'lastRefreshTime', 'lastSuccessTime'
+        'lastRefreshTime', 'lastSuccessTime',
+        // 指纹字段通过 JSON textarea 统一展示
+        'ACCOUNT_TLS_PROFILE', 'ACCOUNT_USER_AGENT', 'ACCOUNT_BROWSER_VERSION',
+        'ACCOUNT_PLATFORM', 'ACCOUNT_PLATFORM_VERSION',
+        'ACCOUNT_SEC_CH_UA', 'ACCOUNT_SEC_CH_UA_FULL_VERSION',
+        'ACCOUNT_SEC_CH_UA_FULL_VERSION_LIST', 'ACCOUNT_FINGERPRINT_GENERATION'
     ];
     
     // 尝试从当前模态框上下文中获取提供商类型
@@ -1372,7 +1419,12 @@ function editProvider(uuid, event) {
         uploadButtons.forEach(button => {
             button.disabled = false;
         });
-        
+
+        // 启用 JSON textarea
+        providerDetail.querySelectorAll('textarea[data-config-key]').forEach(ta => {
+            ta.readOnly = false;
+        });
+
         // 启用下拉选择框
         configSelects.forEach(select => {
             select.disabled = false;
@@ -1429,7 +1481,12 @@ function cancelEdit(uuid, event) {
             input.value = originalValue || '';
         }
     });
-    
+
+    // 恢复 textarea 为只读
+    providerDetail.querySelectorAll('textarea[data-config-key]').forEach(ta => {
+        ta.readOnly = true;
+    });
+
     // 禁用模型复选框
     const modelCheckboxes = providerDetail.querySelectorAll('.model-checkbox');
     modelCheckboxes.forEach(checkbox => {
