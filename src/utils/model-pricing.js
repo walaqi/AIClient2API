@@ -4,10 +4,22 @@ import { existsSync } from 'fs';
 import path from 'path';
 import { atomicWriteFile } from './file-lock.js';
 import logger from './logger.js';
+import { parseProxyUrl } from './proxy-utils.js';
+import { CONFIG } from '../core/config-manager.js';
 
-const PRICE_SOURCE_URL = 'https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.json';
+const PRICE_SOURCE_RAW = 'https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.json';
 const CACHE_FILE = path.join(process.cwd(), 'configs', 'model-prices.json');
 const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+function buildPriceCandidates() {
+    return [
+        { name: 'gh-proxy.org', url: `https://gh-proxy.org/${PRICE_SOURCE_RAW}` },
+        { name: 'hk.gh-proxy.org', url: `https://hk.gh-proxy.org/${PRICE_SOURCE_RAW}` },
+        { name: 'cdn.gh-proxy.org', url: `https://cdn.gh-proxy.org/${PRICE_SOURCE_RAW}` },
+        { name: 'edgeone.gh-proxy.org', url: `https://edgeone.gh-proxy.org/${PRICE_SOURCE_RAW}` },
+        { name: 'direct', url: PRICE_SOURCE_RAW }
+    ];
+}
 /**
  * 假设值. $0.2==1credit. 
  * 低于这个值,会导致kiro计费太低, 
@@ -21,20 +33,35 @@ let sortedKeys = null;
 let lastFetchTime = 0;
 
 export async function fetchAndCacheModelPrices() {
-    try {
-        logger.info('[Model Pricing] Fetching model prices from remote...');
-        const response = await axios.get(PRICE_SOURCE_URL, { timeout: 15000 });
-        if (response.data && typeof response.data === 'object') {
-            priceData = response.data;
-            sortedKeys = Object.keys(priceData).sort((a, b) => b.length - a.length);
-            lastFetchTime = Date.now();
-            await atomicWriteFile(CACHE_FILE, JSON.stringify(priceData, null, 2), 'utf-8');
-            const modelCount = Object.keys(priceData).length;
-            logger.info(`[Model Pricing] Loaded ${modelCount} models from remote, cached to ${CACHE_FILE}`);
-            return true;
+    const candidates = buildPriceCandidates();
+    let proxyConfig = null;
+
+    if (CONFIG && CONFIG.PROXY_URL) {
+        proxyConfig = parseProxyUrl(CONFIG.PROXY_URL);
+    }
+
+    for (const candidate of candidates) {
+        try {
+            logger.info(`[Model Pricing] Fetching from ${candidate.name}...`);
+            const axiosConfig = { timeout: 15000 };
+            if (proxyConfig) {
+                axiosConfig.httpAgent = proxyConfig.httpAgent;
+                axiosConfig.httpsAgent = proxyConfig.httpsAgent;
+                axiosConfig.proxy = false;
+            }
+            const response = await axios.get(candidate.url, axiosConfig);
+            if (response.data && typeof response.data === 'object') {
+                priceData = response.data;
+                sortedKeys = Object.keys(priceData).sort((a, b) => b.length - a.length);
+                lastFetchTime = Date.now();
+                await atomicWriteFile(CACHE_FILE, JSON.stringify(priceData, null, 2), 'utf-8');
+                const modelCount = Object.keys(priceData).length;
+                logger.info(`[Model Pricing] Loaded ${modelCount} models from ${candidate.name}, cached to ${CACHE_FILE}`);
+                return true;
+            }
+        } catch (error) {
+            logger.warn(`[Model Pricing] Failed to fetch from ${candidate.name}: ${error.message}`);
         }
-    } catch (error) {
-        logger.warn('[Model Pricing] Failed to fetch from remote:', error.message);
     }
     return false;
 }

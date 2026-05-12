@@ -1122,6 +1122,20 @@ function renderProviderConfig(provider) {
                     ${field1IsKiro ? '<small class="form-text"><i class="fas fa-info-circle"></i> ' + t('modal.provider.kiroAuthHint') + '</small>' : ''}
                 </div>
             `;
+        } else if (field1Def.type === 'boolean') {
+            const field1BoolValue = field1Value === true || field1Value === 'true';
+            html += `
+                <div class="config-item">
+                    <label>${field1Label}</label>
+                    <select class="form-control"
+                            data-config-key="${field1Key}"
+                            data-config-value="${field1BoolValue}"
+                            disabled>
+                        <option value="true" ${field1BoolValue ? 'selected' : ''} data-i18n="modal.provider.enabled">启用</option>
+                        <option value="false" ${!field1BoolValue ? 'selected' : ''} data-i18n="modal.provider.disabled">禁用</option>
+                    </select>
+                </div>
+            `;
         } else {
             html += `
                 <div class="config-item">
@@ -1182,6 +1196,20 @@ function renderProviderConfig(provider) {
                             </button>
                         </div>
                         ${field2IsKiro ? '<small class="form-text"><i class="fas fa-info-circle"></i> ' + t('modal.provider.kiroAuthHint') + '</small>' : ''}
+                    </div>
+                `;
+            } else if (field2Def.type === 'boolean') {
+                const field2BoolValue = field2Value === true || field2Value === 'true';
+                html += `
+                    <div class="config-item">
+                        <label>${field2Label}</label>
+                        <select class="form-control"
+                                data-config-key="${field2Key}"
+                                data-config-value="${field2BoolValue}"
+                                disabled>
+                            <option value="true" ${field2BoolValue ? 'selected' : ''} data-i18n="modal.provider.enabled">启用</option>
+                            <option value="false" ${!field2BoolValue ? 'selected' : ''} data-i18n="modal.provider.disabled">禁用</option>
+                        </select>
                     </div>
                 `;
             } else {
@@ -1722,6 +1750,17 @@ function addDynamicConfigFields(form, providerType) {
             ${isKiroField ? '<small class="form-text"><i class="fas fa-info-circle"></i> ' + t('modal.provider.kiroAuthHint') + '</small>' : ''}
         </div>
     `;
+            } else if (field1.type === 'boolean') {
+                const field1BoolValue = field1.value === true || field1.value === 'true';
+                fields += `
+                    <div class="form-group">
+                        <label>${field1.label}</label>
+                        <select class="form-control" id="new${field1.id}">
+                            <option value="true" ${field1BoolValue ? 'selected' : ''} data-i18n="modal.provider.enabled">启用</option>
+                            <option value="false" ${!field1BoolValue ? 'selected' : ''} data-i18n="modal.provider.disabled">禁用</option>
+                        </select>
+                    </div>
+                `;
             } else {
                 fields += `
                     <div class="form-group">
@@ -1765,6 +1804,17 @@ function addDynamicConfigFields(form, providerType) {
             ${isKiroField ? '<small class="form-text"><i class="fas fa-info-circle"></i> ' + t('modal.provider.kiroAuthHint') + '</small>' : ''}
         </div>
     `;
+                } else if (field2.type === 'boolean') {
+                    const field2BoolValue = field2.value === true || field2.value === 'true';
+                    fields += `
+                        <div class="form-group">
+                            <label>${field2.label}</label>
+                            <select class="form-control" id="new${field2.id}">
+                                <option value="true" ${field2BoolValue ? 'selected' : ''} data-i18n="modal.provider.enabled">启用</option>
+                                <option value="false" ${!field2BoolValue ? 'selected' : ''} data-i18n="modal.provider.disabled">禁用</option>
+                            </select>
+                        </div>
+                    `;
                 } else {
                     fields += `
                         <div class="form-group">
@@ -1833,7 +1883,11 @@ async function addProvider(providerType) {
     allFields.forEach(field => {
         const element = document.getElementById(`new${field.id}`);
         if (element) {
-            providerConfig[field.id] = element.value || '';
+            if (field.type === 'boolean') {
+                providerConfig[field.id] = element.value === 'true';
+            } else {
+                providerConfig[field.id] = element.value || '';
+            }
         }
     });
     

@@ -546,9 +546,7 @@ export class KiroApiService {
         this.config = config;
         this.credPath = config.KIRO_OAUTH_CREDS_DIR_PATH || path.join(os.homedir(), ".aws", "sso", "cache");
         this.credsBase64 = config.KIRO_OAUTH_CREDS_BASE64;
-        this.useSystemProxy = config?.USE_SYSTEM_PROXY_KIRO ?? false;
-        this.uuid = config?.uuid; // 获取多节点配置的 uuid
-        logger.info(`[Kiro] System proxy ${this.useSystemProxy ? 'enabled' : 'disabled'}`);
+        this.uuid = config?.uuid;
         // this.accessToken = config.KIRO_ACCESS_TOKEN;
         // this.refreshToken = config.KIRO_REFRESH_TOKEN;
         // this.clientId = config.KIRO_CLIENT_ID;

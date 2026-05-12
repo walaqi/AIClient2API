@@ -346,7 +346,9 @@ export function createProviderConfig(options) {
         lastErrorTime: null,
         lastHealthCheckTime: null,
         lastHealthCheckModel: null,
-        lastErrorMessage: null
+        lastErrorMessage: null,
+        ACCOUNT_PROXY_URL: '',
+        ACCOUNT_PROXY_DISABLED: false
     };
     
     // 如果需要 PROJECT_ID，添加空字符串占位

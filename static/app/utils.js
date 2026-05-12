@@ -218,7 +218,9 @@ function getFieldLabel(key) {
         'FORWARD_BASE_URL': 'Forward Base URL',
         'FORWARD_HEADER_NAME': t('modal.provider.field.headerName'),
         'FORWARD_HEADER_VALUE_PREFIX': t('modal.provider.field.headerPrefix'),
-        'USE_SYSTEM_PROXY_FORWARD': t('modal.provider.field.useSystemProxy')
+        'USE_SYSTEM_PROXY_FORWARD': t('modal.provider.field.useSystemProxy'),
+        'ACCOUNT_PROXY_URL': t('modal.provider.field.accountProxyUrl'),
+        'ACCOUNT_PROXY_DISABLED': t('modal.provider.field.accountProxyDisabled')
     };
     
     return labelMap[key] || key;
@@ -230,6 +232,22 @@ function getFieldLabel(key) {
  * @returns {Array} 字段配置数组
  */
 function getProviderTypeFields(providerType) {
+    // 账号级代理字段（所有 poolable providers 共用）
+    const accountProxyFields = [
+        {
+            id: 'ACCOUNT_PROXY_URL',
+            label: `${t('modal.provider.field.accountProxyUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
+            type: 'text',
+            placeholder: 'socks5://host:port / http://host:port (留空走全局)'
+        },
+        {
+            id: 'ACCOUNT_PROXY_DISABLED',
+            label: `${t('modal.provider.field.accountProxyDisabled')} <span class="optional-tag">${t('config.optional')}</span>`,
+            type: 'boolean',
+            placeholder: ''
+        }
+    ];
+
     // 基础配置字段定义
     const fieldConfigs = {
         'openai-custom': [
@@ -292,7 +310,8 @@ function getProviderTypeFields(providerType) {
                 label: `Gemini Base URL <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://cloudcode-pa.googleapis.com'
-            }
+            },
+            ...accountProxyFields
         ],
         'claude-kiro-oauth': [
             {
@@ -318,7 +337,8 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.refreshIdcUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://oidc.{{region}}.amazonaws.com/token'
-            }
+            },
+            ...accountProxyFields
         ],
         'openai-qwen-oauth': [
             {
@@ -338,7 +358,8 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.oauthBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://chat.qwen.ai'
-            }
+            },
+            ...accountProxyFields
         ],
         'gemini-antigravity': [
             {
@@ -364,7 +385,8 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.autopushBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://autopush-cloudcode-pa.sandbox.googleapis.com'
-            }
+            },
+            ...accountProxyFields
         ],
         'openai-iflow': [
             {
@@ -378,7 +400,8 @@ function getProviderTypeFields(providerType) {
                 label: `iFlow Base URL <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://iflow.cn/api'
-            }
+            },
+            ...accountProxyFields
         ],
         'openai-codex-oauth': [
             {
@@ -398,7 +421,8 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.codexBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://api.openai.com/v1/codex'
-            }
+            },
+            ...accountProxyFields
         ],
         'grok-web': [
             {
@@ -424,7 +448,8 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.grokBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://grok.com'
-            }
+            },
+            ...accountProxyFields
         ],
         'forward-api': [
             {

@@ -54,13 +54,43 @@ export function parseProxyUrl(proxyUrl) {
 }
 
 /**
+ * 判断账号级 proxy URL 是否已设置（非空字符串）
+ * @param {*} value
+ * @returns {boolean}
+ */
+function hasAccountProxyUrl(value) {
+    return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
  * 检查指定的提供商是否启用了代理（支持前缀匹配）
- * @param {Object} config - 配置对象
+ *
+ * 优先级（从高到低）：
+ * 1. config.ACCOUNT_PROXY_DISABLED === true → 强制直连，返回 false
+ * 2. config.ACCOUNT_PROXY_URL 非空字符串 → 账号级代理生效，返回 true（绕过白名单）
+ * 3. 全局 PROXY_URL + PROXY_ENABLED_PROVIDERS 白名单匹配
+ *
+ * @param {Object} config - 配置对象（可能已合并账号级字段）
  * @param {string} providerType - 提供商类型
  * @returns {boolean} 是否启用代理
  */
 export function isProxyEnabledForProvider(config, providerType) {
-    if (!config || !config.PROXY_URL || !config.PROXY_ENABLED_PROVIDERS) {
+    if (!config) {
+        return false;
+    }
+
+    // 账号级：显式禁用（最高优先级）
+    if (config.ACCOUNT_PROXY_DISABLED === true) {
+        return false;
+    }
+
+    // 账号级：账号自带代理 URL → 绕过白名单
+    if (hasAccountProxyUrl(config.ACCOUNT_PROXY_URL)) {
+        return true;
+    }
+
+    // 全局代理逻辑
+    if (!config.PROXY_URL || !config.PROXY_ENABLED_PROVIDERS) {
         return false;
     }
 
@@ -80,6 +110,10 @@ export function isProxyEnabledForProvider(config, providerType) {
 
 /**
  * 获取指定提供商的代理配置
+ *
+ * 会先走 isProxyEnabledForProvider 判断是否启用，然后按优先级选取 URL：
+ * 账号级 ACCOUNT_PROXY_URL 非空时使用账号 URL，否则使用全局 PROXY_URL。
+ *
  * @param {Object} config - 配置对象
  * @param {string} providerType - 提供商类型
  * @returns {Object|null} 代理配置对象或 null
@@ -89,9 +123,13 @@ export function getProxyConfigForProvider(config, providerType) {
         return null;
     }
 
-    const proxyConfig = parseProxyUrl(config.PROXY_URL);
+    const useAccountProxy = hasAccountProxyUrl(config.ACCOUNT_PROXY_URL);
+    const chosenUrl = useAccountProxy ? config.ACCOUNT_PROXY_URL.trim() : config.PROXY_URL;
+    const source = useAccountProxy ? 'account' : 'global';
+
+    const proxyConfig = parseProxyUrl(chosenUrl);
     if (proxyConfig) {
-        logger.info(`[Proxy] Using ${proxyConfig.proxyType} proxy for ${providerType}: ${config.PROXY_URL}`);
+        logger.info(`[Proxy] Using ${proxyConfig.proxyType} proxy (${source}) for ${providerType}: ${chosenUrl}`);
     }
     return proxyConfig;
 }
