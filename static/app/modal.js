@@ -1088,8 +1088,11 @@ function renderProviderConfig(provider) {
     });
     html += '</div>';
     
-    // 渲染其他配置字段，每行2列
-    const otherFields = fieldOrder.filter(key => !baseFields.includes(key));
+    // 渲染其他配置字段，每行2列（排除 type=json 字段，由专门代码渲染）
+    const jsonFieldIds = fieldConfigs.filter(f => f.type === 'json').map(f => f.id);
+    const otherFields = fieldOrder.filter(key =>
+        !baseFields.includes(key) && !jsonFieldIds.includes(key)
+    );
     
     for (let i = 0; i < otherFields.length; i += 2) {
         html += '<div class="form-grid">';
