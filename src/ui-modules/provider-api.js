@@ -504,6 +504,7 @@ async function _handleAddProvider(req, res, currentConfig, providerPoolManager, 
         
         // 过滤掉脱敏字段
         const filteredConfig = filterMaskedData(providerConfig);
+        delete filteredConfig.ACCOUNT_FINGERPRINT_JSON; // 虚拟字段，不持久化
         if (usesManagedModelList(providerType)) {
             filteredConfig.supportedModels = normalizeModelIds(filteredConfig.supportedModels);
             filteredConfig.notSupportedModels = [];
@@ -606,6 +607,7 @@ async function _handleUpdateProvider(req, res, currentConfig, providerPoolManage
         
         // 过滤掉传入配置中的脱敏占位符，避免覆盖真实数据
         const filteredConfig = filterMaskedData(providerConfig);
+        delete filteredConfig.ACCOUNT_FINGERPRINT_JSON; // 虚拟字段，不持久化
         if (usesManagedModelList(providerType)) {
             filteredConfig.supportedModels = normalizeModelIds(filteredConfig.supportedModels);
             filteredConfig.notSupportedModels = [];
