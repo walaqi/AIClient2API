@@ -1,147 +1,234 @@
+import { parseAwsEventStreamFrames, normalizeKiroToolInput } from '../../src/providers/claude/aws-event-stream-parser.js';
+import logger from '../../src/utils/logger.js';
+
 /**
- * P1 单测: parseAwsEventStreamBuffer 与 StringDecoder 跨 chunk 边界
- *
- * 不依赖真实 Kiro fixture (避免循环依赖: 测试用解析器自身正确)。
- * 用最小合成数据触发各个分支:
- *  - 单一退出点 (P1-2)
- *  - 中文 / Emoji chunk 边界 (P0-2 StringDecoder)
- *  - JSON 解析失败导致 searchStart 推进 + 下一 chunk 让它变完整
- *  - 流提前结束 (buffer 残留) 触发 truncated 信号 (P0-1)
+ * AWS event-stream header encoding:
+ *   [name_len:1][name][value_type:1][value_len:2 BE][value]
+ * value_type 7 = string
  */
-import { StringDecoder } from 'string_decoder';
+function writeStringHeader(name, valueBytes) {
+    const nameBuf = Buffer.from(name, 'ascii');
+    const valBuf = Buffer.isBuffer(valueBytes) ? valueBytes : Buffer.from(valueBytes, 'utf8');
+    const buf = Buffer.alloc(1 + nameBuf.length + 1 + 2 + valBuf.length);
+    let p = 0;
+    buf.writeUInt8(nameBuf.length, p); p += 1;
+    nameBuf.copy(buf, p); p += nameBuf.length;
+    buf.writeUInt8(7, p); p += 1;
+    buf.writeUInt16BE(valBuf.length, p); p += 2;
+    valBuf.copy(buf, p);
+    return buf;
+}
 
-// 直接测试纯函数模块,无外部依赖
-import { parseAwsEventStreamBuffer } from '../../src/providers/claude/aws-event-stream-parser.js';
+function makeFrame(payload, headersBuf = null) {
+    const payloadBuf = Buffer.from(payload, 'utf8');
+    const headers = headersBuf || Buffer.concat([
+        writeStringHeader(':event-type', 'event'),
+        writeStringHeader(':content-type', 'application/json'),
+        writeStringHeader(':message-type', 'event'),
+    ]);
+    const totalLen = 12 + headers.length + payloadBuf.length + 4;
+    const buf = Buffer.alloc(totalLen);
+    buf.writeUInt32BE(totalLen, 0);
+    buf.writeUInt32BE(headers.length, 4);
+    buf.writeUInt32BE(0, 8);
+    headers.copy(buf, 12);
+    payloadBuf.copy(buf, 12 + headers.length);
+    buf.writeUInt32BE(0, totalLen - 4);
+    return buf;
+}
 
-const svc = { parseAwsEventStreamBuffer };
-function makeStub() { return svc; }
-
-describe('parseAwsEventStreamBuffer', () => {
-    const svc = makeStub();
-
-    describe('单一退出点 (P1-2)', () => {
-        test('A: 没有 { 时返回空 remaining', () => {
-            const r = svc.parseAwsEventStreamBuffer(':event-type\x00\x00\x00');
-            expect(r.events).toEqual([]);
-            expect(r.remaining).toBe('');
-        });
-
-        test('B: 未闭合 JSON 保留从 jsonStart 起的字节', () => {
-            const r = svc.parseAwsEventStreamBuffer('xxx{"content":"hel');
-            expect(r.events).toEqual([]);
-            expect(r.remaining).toBe('{"content":"hel');
-        });
-
-        test('C: 单条完整 content 事件被消费,remaining 为空', () => {
-            const r = svc.parseAwsEventStreamBuffer(':msg{"content":"hi"}');
-            expect(r.events).toEqual([{ type: 'content', data: 'hi' }]);
-            expect(r.remaining).toBe('');
-        });
+describe('parseAwsEventStreamFrames', () => {
+    test('单帧 round-trip: content 事件', () => {
+        const frame = makeFrame('{"content":"hello"}');
+        const { events, remaining } = parseAwsEventStreamFrames(frame);
+        expect(events).toEqual([{ type: 'content', data: 'hello' }]);
+        expect(remaining.length).toBe(0);
     });
 
-    describe('JSON 解析失败 + 续传 (P1-2 真实场景)', () => {
-        test('失败的 {...} 跳过后,后续完整 JSON 仍能解析', () => {
-            // 第一个 {...} 是闭合的但 JSON.parse 会失败;之后跟一个有效的 content 事件
-            const buf = '{not json}{"content":"hello"}';
-            const r = svc.parseAwsEventStreamBuffer(buf);
-            const contentEvents = r.events.filter(e => e.type === 'content');
-            expect(contentEvents).toHaveLength(1);
-            expect(contentEvents[0].data).toBe('hello');
-            expect(r.remaining).toBe('');
-        });
-
-        test('未闭合 JSON 跨两次调用拼接还原', () => {
-            const part1 = ':msg{"content":"he';
-            const r1 = svc.parseAwsEventStreamBuffer(part1);
-            expect(r1.events).toHaveLength(0);
-            expect(r1.remaining).toBe('{"content":"he');
-
-            const part2 = r1.remaining + 'llo"}';
-            const r2 = svc.parseAwsEventStreamBuffer(part2);
-            const contentEvents = r2.events.filter(e => e.type === 'content');
-            expect(contentEvents).toHaveLength(1);
-            expect(contentEvents[0].data).toBe('hello');
-        });
+    test('多帧批量: content + reasoning + metering', () => {
+        const buf = Buffer.concat([
+            makeFrame('{"content":"a"}'),
+            makeFrame('{"text":"think"}'),
+            makeFrame('{"unit":"tokens","usage":42}'),
+        ]);
+        const { events, remaining } = parseAwsEventStreamFrames(buf);
+        expect(events).toHaveLength(3);
+        expect(events[0]).toEqual({ type: 'content', data: 'a' });
+        expect(events[1]).toEqual({ type: 'reasoning', data: 'think' });
+        expect(events[2]).toEqual({ type: 'metering', data: { unit: 'tokens', usage: 42 } });
+        expect(remaining.length).toBe(0);
     });
 
-    describe('多条事件批量解析', () => {
-        test('content + reasoning + metering 在同一 buffer', () => {
-            const buf = '{"content":"a"}\x00:event-type{"text":"think"}\x00{"unit":1,"usage":2}';
-            const r = svc.parseAwsEventStreamBuffer(buf);
-            const types = r.events.map(e => e.type);
-            expect(types).toContain('content');
-            expect(types).toContain('reasoning');
-            expect(types).toContain('metering');
-            expect(r.remaining).toBe('');
-        });
-
-        test('toolUse 开始事件被识别', () => {
-            const buf = '{"name":"foo","toolUseId":"t1","input":""}';
-            const r = svc.parseAwsEventStreamBuffer(buf);
-            expect(r.events).toHaveLength(1);
-            expect(r.events[0].type).toBe('toolUse');
-            expect(r.events[0].data.name).toBe('foo');
-            expect(r.events[0].data.toolUseId).toBe('t1');
-        });
-    });
-});
-
-describe('StringDecoder 跨 chunk 边界 (P0-2)', () => {
-    test('中文字符被切两半,不产生 U+FFFD', () => {
-        // "你好" UTF-8: e4 bd a0 e5 a5 bd
-        const fullBytes = Buffer.from('你好', 'utf8');
-        const part1 = fullBytes.subarray(0, 4);  // 完整"你" + "好" 的第一字节
-        const part2 = fullBytes.subarray(4);     // "好" 剩 2 字节
-        const decoder = new StringDecoder('utf8');
-        const out = decoder.write(part1) + decoder.write(part2) + decoder.end();
-        expect(out).toBe('你好');
-        expect(out).not.toContain('�');
+    test('帧未收完: events 部分产出, remaining 是剩余 Buffer', () => {
+        const full = Buffer.concat([makeFrame('{"content":"a"}'), makeFrame('{"content":"b"}')]);
+        const truncated = full.subarray(0, full.length - 5);
+        const { events, remaining } = parseAwsEventStreamFrames(truncated);
+        expect(events).toHaveLength(1);
+        expect(events[0].data).toBe('a');
+        expect(remaining.length).toBeGreaterThan(0);
     });
 
-    test('Emoji 🎉 (4 字节) 被切两半,不产生 U+FFFD', () => {
-        const fullBytes = Buffer.from('🎉', 'utf8');
-        const part1 = fullBytes.subarray(0, 2);
-        const part2 = fullBytes.subarray(2);
-        const decoder = new StringDecoder('utf8');
-        const out = decoder.write(part1) + decoder.write(part2) + decoder.end();
-        expect(out).toBe('🎉');
-        expect(out).not.toContain('�');
+    test('帧头数值非法: 跳 1 字节继续找帧', () => {
+        const garbage = Buffer.from([0xff, 0xff, 0xff, 0xff, 0xff]);
+        const buf = Buffer.concat([garbage, makeFrame('{"content":"ok"}')]);
+        const { events } = parseAwsEventStreamFrames(buf);
+        expect(events).toHaveLength(1);
+        expect(events[0].data).toBe('ok');
     });
 
-    test('对照: 直接 Buffer.toString() 切多字节会产生 U+FFFD', () => {
-        const fullBytes = Buffer.from('你好', 'utf8');
-        const part1 = fullBytes.subarray(0, 4);
-        const part2 = fullBytes.subarray(4);
-        const out = part1.toString('utf8') + part2.toString('utf8');
-        expect(out).toContain('�'); // 这是 P0-2 修复前的行为
+    test('sync-loss 未超阈值 → 跳字节后仍能恢复 frame', () => {
+        const garbage = Buffer.alloc(200, 0xff);
+        const frame = makeFrame('{"content":"x"}');
+        const buf = Buffer.concat([garbage, frame]);
+        const { events, remaining } = parseAwsEventStreamFrames(buf);
+        expect(events).toHaveLength(1);
+        expect(events[0].data).toBe('x');
+        expect(remaining.length).toBe(0);
     });
-});
 
-describe('parseAwsEventStreamBuffer 配合 StringDecoder (端到端)', () => {
-    test('包含中文的 content 事件被正确还原 (chunk 边界在中文字符上)', () => {
-        const svc = makeStub();
-        const fullPayload = '{"content":"你好世界"}';
-        const fullBytes = Buffer.from(fullPayload, 'utf8');
-        // 在中文字符中间切两半
-        const cut = 11; // "你"(3字节) + "好"(3字节) + "世"切到第 1 字节
-        const part1 = fullBytes.subarray(0, cut);
-        const part2 = fullBytes.subarray(cut);
+    test('sync-loss 超阈值 → 丢弃 buffer + WARN', () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+        try {
+            // garbage 必须 > Math.max(SYNC_LOSS_WARN_BYTES=256, bufLen*0.10) = 256
+            // 且尾部不带可恢复 frame, 否则会先命中 frame, bytesSkipped 被重置
+            const garbage = Buffer.alloc(300, 0xff);
+            const { events, remaining } = parseAwsEventStreamFrames(garbage);
+            expect(events).toEqual([]);
+            expect(remaining.length).toBe(0);
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Sync loss exceeded budget'));
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
 
-        const decoder = new StringDecoder('utf8');
-        let buffer = '';
+    test('sync-loss 跳 ≥256 字节后恢复 frame → WARN recovered', () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+        try {
+            // 256 字节 garbage 不会触发 discard (需要 > 阈值, 实际跳 256 字节命中 frame 时仍未越界)
+            // 实际验证: bufLen = 256 + frame_len ≈ 290, 阈值 = max(256, 290*0.1=29) = 256
+            // bytesSkipped 累积到 256 时 256 > 256 为 false, 继续; 找到 frame 后 bytesSkipped >= 256 触发 recovered WARN
+            const garbage = Buffer.alloc(256, 0xff);
+            const frame = makeFrame('{"content":"recovered"}');
+            const buf = Buffer.concat([garbage, frame]);
+            const { events } = parseAwsEventStreamFrames(buf);
+            expect(events).toHaveLength(1);
+            expect(events[0].data).toBe('recovered');
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Recovered frame after skipping'));
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
 
-        buffer += decoder.write(part1);
-        let r1 = svc.parseAwsEventStreamBuffer(buffer);
-        buffer = r1.remaining;
-        // 此时 JSON 还未闭合, events 应为空
+    test('跨 chunk 拼接: 帧中间切, 第二次调用还原', () => {
+        const frame = makeFrame('{"content":"split"}');
+        const cut = Math.floor(frame.length / 2);
+        const part1 = frame.subarray(0, cut);
+        const part2 = frame.subarray(cut);
+
+        const r1 = parseAwsEventStreamFrames(part1);
         expect(r1.events).toHaveLength(0);
+        expect(r1.remaining.length).toBe(part1.length);
 
-        buffer += decoder.write(part2);
-        buffer += decoder.end();
-        let r2 = svc.parseAwsEventStreamBuffer(buffer);
-        const contentEvents = r2.events.filter(e => e.type === 'content');
-        expect(contentEvents).toHaveLength(1);
-        expect(contentEvents[0].data).toBe('你好世界');
-        expect(r2.remaining).toBe('');
+        const combined = Buffer.concat([r1.remaining, part2]);
+        const r2 = parseAwsEventStreamFrames(combined);
+        expect(r2.events).toHaveLength(1);
+        expect(r2.events[0].data).toBe('split');
+        expect(r2.remaining.length).toBe(0);
+    });
+
+    test('header value 含 0x22 0x5c 0x7b 0x7d 字节, payload 仍能正确解出', () => {
+        const evilHeader = writeStringHeader(':custom', Buffer.from([0x22, 0x5c, 0x7b, 0x7d, 0x22, 0x7b]));
+        const headers = Buffer.concat([
+            writeStringHeader(':event-type', 'event'),
+            evilHeader,
+        ]);
+        const frame = makeFrame('{"content":"survived"}', headers);
+        const { events, remaining } = parseAwsEventStreamFrames(frame);
+        expect(events).toEqual([{ type: 'content', data: 'survived' }]);
+        expect(remaining.length).toBe(0);
+    });
+
+    test('空 buffer 返回空结果', () => {
+        const { events, remaining } = parseAwsEventStreamFrames(Buffer.alloc(0));
+        expect(events).toEqual([]);
+        expect(remaining.length).toBe(0);
+    });
+
+    test('buffer 小于 prelude 长度时返回整个 buffer 作为 remaining', () => {
+        const small = Buffer.from([0x00, 0x00, 0x00]);
+        const { events, remaining } = parseAwsEventStreamFrames(small);
+        expect(events).toEqual([]);
+        expect(remaining.length).toBe(3);
+    });
+});
+
+describe('事件分发 (payload shape → event type)', () => {
+    test('toolUse 事件被正确分类', () => {
+        const frame = makeFrame('{"name":"Bash","toolUseId":"t1","input":"ls"}');
+        const { events } = parseAwsEventStreamFrames(frame);
+        expect(events[0].type).toBe('toolUse');
+        expect(events[0].data.name).toBe('Bash');
+        expect(events[0].data.toolUseId).toBe('t1');
+        expect(events[0].data.input).toBe('ls');
+    });
+
+    test('toolUseInput 事件被正确分类', () => {
+        const frame = makeFrame('{"toolUseId":"t1","input":"more data"}');
+        const { events } = parseAwsEventStreamFrames(frame);
+        expect(events[0].type).toBe('toolUseInput');
+        expect(events[0].data.input).toBe('more data');
+    });
+
+    test('toolUseStop 事件被正确分类', () => {
+        const frame = makeFrame('{"stop":true}');
+        const { events } = parseAwsEventStreamFrames(frame);
+        expect(events[0].type).toBe('toolUseStop');
+        expect(events[0].data.stop).toBe(true);
+    });
+
+    test('contextUsage 事件被正确分类', () => {
+        const frame = makeFrame('{"contextUsagePercentage":75}');
+        const { events } = parseAwsEventStreamFrames(frame);
+        expect(events[0].type).toBe('contextUsage');
+        expect(events[0].data.contextUsagePercentage).toBe(75);
+    });
+
+    test('metering 事件被正确分类', () => {
+        const frame = makeFrame('{"unit":"credits","usage":100}');
+        const { events } = parseAwsEventStreamFrames(frame);
+        expect(events[0].type).toBe('metering');
+        expect(events[0].data).toEqual({ unit: 'credits', usage: 100 });
+    });
+
+    test('非 JSON payload 不抛异常, 返回空 events 且 WARN', () => {
+        const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+        try {
+            const frame = makeFrame('this is not json at all');
+            const { events, remaining } = parseAwsEventStreamFrames(frame);
+            expect(events).toEqual([]);
+            expect(remaining.length).toBe(0);
+            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Non-JSON payload frame skipped'));
+        } finally {
+            warnSpy.mockRestore();
+        }
+    });
+});
+
+describe('normalizeKiroToolInput', () => {
+    test('null/undefined → 空字符串', () => {
+        expect(normalizeKiroToolInput(null)).toBe('');
+        expect(normalizeKiroToolInput(undefined)).toBe('');
+    });
+
+    test('string 原样返回', () => {
+        expect(normalizeKiroToolInput('hello')).toBe('hello');
+    });
+
+    test('object → JSON.stringify', () => {
+        expect(normalizeKiroToolInput({ a: 1 })).toBe('{"a":1}');
+    });
+
+    test('number → String()', () => {
+        expect(normalizeKiroToolInput(42)).toBe('42');
     });
 });

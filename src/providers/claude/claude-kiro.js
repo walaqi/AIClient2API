@@ -8,7 +8,6 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import * as http from 'http';
 import * as https from 'https';
-import { StringDecoder } from 'string_decoder';
 import { getProviderModels } from '../provider-models.js';
 import { 
     countTextTokens as countTextTokensUtil, 
@@ -21,11 +20,11 @@ import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvide
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { calculateCacheTokens } from '../../utils/model-pricing.js';
-import { parseAwsEventStreamBuffer as awsParseEventStreamBuffer } from './aws-event-stream-parser.js';
+import { parseAwsEventStreamFrames as awsParseEventStreamFrames } from './aws-event-stream-parser.js';
 
 const KIRO_THINKING = {
     MIN_BUDGET_TOKENS: 1024,
-    MAX_BUDGET_TOKENS: 24576,
+    MAX_BUDGET_TOKENS: 1024*8,
     DEFAULT_BUDGET_TOKENS: 20000,
     START_TAG: '<thinking>',
     END_TAG: '</thinking>',
@@ -41,7 +40,7 @@ const KIRO_CONSTANTS = {
     DEFAULT_MODEL_NAME: 'claude-sonnet-4-5',
     AXIOS_TIMEOUT: 120000, // 2 minutes timeout for normal (non-stream) requests
     STREAM_TOTAL_TIMEOUT: 300000, // 5 minutes total timeout for stream requests (overridable via CONFIG.KIRO_STREAM_TIMEOUT_MS)
-    STREAM_INACTIVITY_TIMEOUT: 60000, // 60s socket inactivity (after first byte) (overridable via CONFIG.KIRO_STREAM_INACTIVITY_MS)
+    STREAM_INACTIVITY_TIMEOUT: 120000, // 60s socket inactivity (after first byte) (overridable via CONFIG.KIRO_STREAM_INACTIVITY_MS)
     TOKEN_REFRESH_TIMEOUT: 15000, // 15 seconds timeout for token refresh (shorter to avoid blocking)
     USER_AGENT: 'KiroIDE',
     KIRO_VERSION: '0.11.63',
@@ -1164,9 +1163,22 @@ async saveCredentialsToFile(filePath, newData) {
                 };
                 toolsContext = { tools: [placeholderTool] };
             } else {
-                const MAX_DESCRIPTION_LENGTH = 1024*20;
+                /*
+                * 4K 阈值更激进——Bash / TodoWrite / Agent / EnterPlanMode 都会被截。配合头尾保留策略能减少损失，但 Bash 的 git 安全规则在中部会被丢，建议留意。
+                */
+                const MAX_DESCRIPTION_LENGTH = 1024*8;
+                // const MAX_DESCRIPTION_LENGTH = 1024*4;
+                // const MAX_DESCRIPTION_LENGTH = 1024*20;
+
+                // 截断白名单：这些工具的 description 中部含有关键安全/正确性约束（如 Bash 的 git 安全协议、
+                // NEVER skip hooks / NEVER force push 等），头尾保留策略会丢中部，因此对它们绕过截断。
+                // 名称完全匹配（大小写敏感）。
+                const TRUNCATION_WHITELIST = new Set([
+                    'Bash',
+                ]);
 
                 let truncatedCount = 0;
+                let whitelistSkippedCount = 0;
                 const kiroTools = filteredTools
                     .filter(tool => {
                         // 过滤掉描述为空的工具
@@ -1179,11 +1191,27 @@ async saveCredentialsToFile(filePath, newData) {
                     .map(tool => {
                         let desc = tool.description || "";
                         const originalLength = desc.length;
-                        
-                        if (desc.length > MAX_DESCRIPTION_LENGTH) {
-                            desc = desc.substring(0, MAX_DESCRIPTION_LENGTH) + "...";
+                        const isWhitelisted = TRUNCATION_WHITELIST.has(tool.name);
+
+                        if (desc.length > MAX_DESCRIPTION_LENGTH && isWhitelisted) {
+                            whitelistSkippedCount++;
+                            logger.info(`[Kiro] Whitelist: keeping tool '${tool.name}' description in full (${originalLength} chars, would have been truncated)`);
+                        } else if (desc.length > MAX_DESCRIPTION_LENGTH) {
+                            // 头 + 尾保留：工具描述的关键约束通常分布在开头（用途/总则）和结尾（边界规则），
+                            // 中部多为示例。该策略丢中部保两端，比简单 substring 截尾损失小。
+                            const placeholder = '\n\n…(中间示例已省略，保留首尾规则)…\n\n';
+                            const budget = MAX_DESCRIPTION_LENGTH - placeholder.length;
+                            const headLen = Math.floor(budget * 0.65);
+                            const tailLen = budget - headLen;
+                            let head = desc.slice(0, headLen);
+                            const lastNL = head.lastIndexOf('\n');
+                            if (lastNL > headLen * 0.8) head = head.slice(0, lastNL);
+                            let tail = desc.slice(desc.length - tailLen);
+                            const firstNL = tail.indexOf('\n');
+                            if (firstNL > 0 && firstNL < tailLen * 0.2) tail = tail.slice(firstNL + 1);
+                            desc = head + placeholder + tail;
                             truncatedCount++;
-                            logger.info(`[Kiro] Truncated tool '${tool.name}' description: ${originalLength} -> ${desc.length} chars`);
+                            logger.info(`[Kiro] Truncated tool '${tool.name}' description (head+tail): ${originalLength} -> ${desc.length} chars`);
                         }
                         
                         return {
@@ -1198,7 +1226,10 @@ async saveCredentialsToFile(filePath, newData) {
                     });
                 
                 if (truncatedCount > 0) {
-                    logger.info(`[Kiro] Truncated ${truncatedCount} tool description(s) to max ${MAX_DESCRIPTION_LENGTH} chars`);
+                    logger.info(`[Kiro] Truncated ${truncatedCount} tool description(s) to max ${MAX_DESCRIPTION_LENGTH} chars (head+tail policy)`);
+                }
+                if (whitelistSkippedCount > 0) {
+                    logger.info(`[Kiro] Skipped truncation for ${whitelistSkippedCount} whitelisted tool(s)`);
                 }
 
                 // 检查过滤后是否还有有效工具
@@ -1764,7 +1795,10 @@ async saveCredentialsToFile(filePath, newData) {
             
             // Handle 429 (Too Many Requests) - wait baseDelay then switch credential
             if (status === 429) {
-                logger.info(`[Kiro] Received 429 (Too Many Requests). Waiting ${baseDelay}ms before switching credential...`);
+                const retryAfter = this._getRetryAfter(error);
+                const bodyText = this._getErrorResponseText(error);
+                logger.warn(`[Kiro] Received 429 (Too Many Requests). Retry-After=${retryAfter || 'none'}, Body=${(bodyText || '').substring(0, 800)}`);
+                logger.info(`[Kiro] Waiting ${baseDelay}ms before switching credential...`);
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -1774,7 +1808,9 @@ async saveCredentialsToFile(filePath, newData) {
 
             // Handle 5xx server errors - wait baseDelay then switch credential
             if (status >= 500 && status < 600) {
-                logger.info(`[Kiro] Received ${status} server error. Waiting ${baseDelay}ms before switching credential...`);
+                const bodyText = this._getErrorResponseText(error);
+                logger.warn(`[Kiro] Received ${status} server error. Body=${(bodyText || '').substring(0, 800)}`);
+                logger.info(`[Kiro] Waiting ${baseDelay}ms before switching credential...`);
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -1813,6 +1849,35 @@ async saveCredentialsToFile(filePath, newData) {
         } catch {
             return String(data);
         }
+    }
+
+    /**
+     * 流式错误响应体读取：axios 用 responseType: 'stream' 时，error.response.data 是一个 Readable 流而不是 Buffer。
+     * 需要异步读取流内容才能拿到上游真实错误消息（如 429 的 ThrottlingException、token limit、配额耗尽等）。
+     */
+    async _readErrorResponseBody(error, timeoutMs = 2000) {
+        const data = error?.response?.data;
+        if (data && typeof data.on === 'function') {
+            try {
+                const chunks = [];
+                await new Promise((resolve) => {
+                    data.on('data', (c) => chunks.push(c));
+                    data.on('end', resolve);
+                    data.on('error', resolve);
+                    setTimeout(resolve, timeoutMs);
+                });
+                return Buffer.concat(chunks).toString('utf8');
+            } catch (e) {
+                return `(stream body read failed: ${e.message})`;
+            }
+        }
+        return this._getErrorResponseText(error);
+    }
+
+    _getRetryAfter(error) {
+        return error?.response?.headers?.['retry-after']
+            || error?.response?.headers?.['Retry-After']
+            || null;
     }
 
     _isRefreshableForbidden(error) {
@@ -2040,8 +2105,11 @@ async saveCredentialsToFile(filePath, newData) {
             fullResponseText = fullResponseText.trim();
         }
         
-        // 5. Final content cleanup: convert escaped newlines to literal newlines
-        fullResponseText = fullResponseText.replace(/(?<!\\)\\n/g, '\n');
+        // 5. Final content cleanup: convert escaped newlines to literal newlines (诊断：仅在检测到时解码并打日志)
+        if (/(?<!\\)\\n/.test(fullResponseText)) {
+            logger.warn(`[Kiro] Decoded escaped \\n in aggregated non-stream response (len=${fullResponseText.length})`);
+            fullResponseText = fullResponseText.replace(/(?<!\\)\\n/g, '\n');
+        }
         
         //logger.info(`[Kiro] Final response text after tool call cleanup: ${fullResponseText}`);
         //logger.info(`[Kiro] Final tool calls after deduplication: ${JSON.stringify(uniqueToolCalls)}`);
@@ -2090,12 +2158,11 @@ async saveCredentialsToFile(filePath, newData) {
     }
 
     /**
-     * 解析 AWS Event Stream 格式，提取所有完整的 JSON 事件
-     * 返回 { events: 解析出的事件数组, remaining: 未处理完的缓冲区 }
+     * 委托到 `awsParseEventStreamFrames`，保留为 method 是为了便于子类 override 和测试 mock。
+     * 入参：Buffer。返回：{ events: 已解析事件数组, remaining: 未处理完的 Buffer }。
      */
-    parseAwsEventStreamBuffer(buffer) {
-        // 委托到独立模块以便单元测试 (避免完整初始化 KiroApiService)
-        return awsParseEventStreamBuffer(buffer);
+    parseAwsEventStreamFrames(buf) {
+        return awsParseEventStreamFrames(buf);
     }
 
     /**
@@ -2151,11 +2218,20 @@ async saveCredentialsToFile(filePath, newData) {
             const response = await this.axiosInstance.request(axiosConfig);
 
             stream = response.data;
-            const decoder = new StringDecoder('utf8');
-            let buffer = '';
-            let lastContentEvent = null;  // 用于检测连续重复的 content 事件
-            let decoderEnded = false;
+            let buffer = Buffer.alloc(0);
+            let lastContentEvent = null;
             let socketAborted = false;
+            let lastRawChunk = null;
+            let totalRawBytes = 0;
+            let chunkCount = 0;
+
+            const captureRawPath = process.env.KIRO_CAPTURE_RAW;
+            let captureFs = null;
+            if (captureRawPath) {
+                const fsModule = await import('fs');
+                captureFs = fsModule.default || fsModule;
+                logger.info(`[Kiro Stream] KIRO_CAPTURE_RAW enabled, writing to ${captureRawPath}`);
+            }
             // 监听 underlying socket 的 abort/error,作为截断信号源之一
             const onSocketAborted = () => { socketAborted = true; };
             if (stream && typeof stream.on === 'function') {
@@ -2181,10 +2257,25 @@ async saveCredentialsToFile(filePath, newData) {
                             }
                         } catch (e) { /* socket 可能已不可用,忽略 */ }
                     }
-                    buffer += decoder.write(chunk);
+                    // 诊断：记录 raw chunk 用于事后分析
+                    if (!chunk) continue;
+                    const chunkBuf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                    if (chunkBuf.length > 0) {
+                        lastRawChunk = chunkBuf;
+                        totalRawBytes += chunkBuf.length;
+                        chunkCount++;
+                    }
+
+                    if (captureFs) {
+                        try { captureFs.appendFileSync(captureRawPath, chunkBuf); } catch (e) { /* ignore */ }
+                    }
+
+                    // 已知 O(n²) 拼接，本轮不做 BufferList 优化；当前样本 < 1MB 无感，
+                    // 未来若日志显示 totalRawBytes > 10MB 才需要重构成链表式 BufferList。
+                    buffer = buffer.length === 0 ? chunkBuf : Buffer.concat([buffer, chunkBuf]);
 
                     // 解析缓冲区中的事件
-                    const { events, remaining } = this.parseAwsEventStreamBuffer(buffer);
+                    const { events, remaining } = this.parseAwsEventStreamFrames(buffer);
                     buffer = remaining;
 
                     // yield 所有事件，但过滤连续完全相同的 content 事件（Kiro API 有时会重复发送）
@@ -2216,14 +2307,7 @@ async saveCredentialsToFile(filePath, newData) {
                         }
                     }
                 }
-                // 正常路径：榨干 decoder 残留字节（可能含未结束的多字节序列）
-                buffer += decoder.end();
-                decoderEnded = true;
             } finally {
-                // 异常路径同样要榨干 decoder，避免最后字节被吞
-                if (!decoderEnded) {
-                    try { buffer += decoder.end(); } catch (e) { /* ignore */ }
-                }
                 // 卸载 socket 监听,避免泄漏
                 if (stream && typeof stream.off === 'function') {
                     try { stream.off('aborted', onSocketAborted); } catch (e) {}
@@ -2232,7 +2316,15 @@ async saveCredentialsToFile(filePath, newData) {
             }
             // 诊断：记录流结束时的 buffer 状态
             if (buffer.length > 0) {
-                logger.warn(`[Kiro Stream] Raw stream ended with remaining buffer (${buffer.length} bytes): ${buffer.substring(0, 200)}`);
+                const head = buffer.subarray(0, 200);
+                logger.warn(`[Kiro Stream] Raw stream ended with remaining buffer (${buffer.length} bytes), head.hex=${head.toString('hex')}, head.utf8=${JSON.stringify(head.toString('utf8'))}`);
+            }
+            // 诊断：dump 最后一个 raw chunk 的尾部 (hex + ascii)，识别 AWS event-stream 控制帧
+            if (lastRawChunk && lastRawChunk.length > 0) {
+                const tail = lastRawChunk.subarray(Math.max(0, lastRawChunk.length - 256));
+                const hexDump = tail.toString('hex');
+                const asciiDump = tail.toString('utf8').replace(/[\x00-\x1f\x7f-\xff]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+                logger.info(`[Kiro Stream] Last raw chunk diagnostic: chunkCount=${chunkCount}, totalRawBytes=${totalRawBytes}, lastChunkLen=${lastRawChunk.length}, tail.hex=${hexDump.substring(0, 512)}, tail.ascii=${asciiDump.substring(0, 256)}`);
             }
             // 多源 truncated 信号: buffer 残留 OR socket abort
             // (axios 抛错走 catch 路径,不会到达这里)
@@ -2289,7 +2381,10 @@ async saveCredentialsToFile(filePath, newData) {
             
             // Handle 429 (Too Many Requests) - wait baseDelay then switch credential
             if (status === 429) {
-                logger.info(`[Kiro] Received 429 (Too Many Requests) in stream. Waiting ${baseDelay}ms before switching credential...`);
+                const retryAfter = this._getRetryAfter(error);
+                const bodyText = await this._readErrorResponseBody(error);
+                logger.warn(`[Kiro] Received 429 (Too Many Requests) in stream. Retry-After=${retryAfter || 'none'}, Body=${(bodyText || '').substring(0, 800)}`);
+                logger.info(`[Kiro] Waiting ${baseDelay}ms before switching credential...`);
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -2299,7 +2394,9 @@ async saveCredentialsToFile(filePath, newData) {
 
             // Handle 5xx server errors - wait baseDelay then switch credential
             if (status >= 500 && status < 600) {
-                logger.info(`[Kiro] Received ${status} server error in stream. Waiting ${baseDelay}ms before switching credential...`);
+                const bodyText = await this._readErrorResponseBody(error);
+                logger.warn(`[Kiro] Received ${status} server error in stream. Body=${(bodyText || '').substring(0, 800)}`);
+                logger.info(`[Kiro] Waiting ${baseDelay}ms before switching credential...`);
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -2423,8 +2520,15 @@ async saveCredentialsToFile(filePath, newData) {
             }
             const events = [];
             events.push(...ensureBlockStart('text'));
-            // 将转义的换行符转换为真实换行符，确保流式输出显示正常
-            const decodedText = text.replace(/(?<!\\)\\n/g, '\n');
+            // 诊断：仅在检测到 2 字符 \n 转义序列时才解码并打日志
+            // aws-event-stream-parser.js 已经 JSON.parse 过，正常情况下不应该再含 2 字符 \n
+            const hasEscapedNewline = /(?<!\\)\\n/.test(text);
+            const decodedText = hasEscapedNewline
+                ? text.replace(/(?<!\\)\\n/g, '\n')
+                : text;
+            if (hasEscapedNewline) {
+                logger.warn(`[Kiro Stream] Decoded escaped \\n in text chunk (len=${text.length}, sample=${JSON.stringify(text.slice(0, 80))})`);
+            }
             events.push({
                 type: "content_block_delta",
                 index: streamState.textBlockIndex,
@@ -2439,8 +2543,14 @@ async saveCredentialsToFile(filePath, newData) {
             }
             const events = [];
             events.push(...ensureBlockStart('thinking'));
-            // 将转义的换行符转换为真实换行符
-            const decodedThinking = thinking.replace(/(?<!\\)\\n/g, '\n');
+            // 诊断：仅在检测到 2 字符 \n 转义序列时才解码并打日志
+            const hasEscapedNewline = /(?<!\\)\\n/.test(thinking);
+            const decodedThinking = hasEscapedNewline
+                ? thinking.replace(/(?<!\\)\\n/g, '\n')
+                : thinking;
+            if (hasEscapedNewline) {
+                logger.warn(`[Kiro Stream] Decoded escaped \\n in thinking chunk (len=${thinking.length})`);
+            }
             events.push({
                 type: "content_block_delta",
                 index: streamState.thinkingBlockIndex,
@@ -2828,8 +2938,7 @@ async saveCredentialsToFile(filePath, newData) {
                 !streamState.hasVisibleText &&
                 toolCalls.length === 0;
             if (emittedOnlyThinking) {
-                logger.warn('[Kiro Stream] Thinking-only response received; emitting minimal text block and max_tokens stop_reason');
-                yield* pushEvents(createTextDeltaEvents(' '));
+                logger.warn('[Kiro Stream] Thinking-only response received; not injecting any fallback text');
             }
 
             yield* pushEvents(stopBlock(streamState.textBlockIndex));
@@ -2888,13 +2997,15 @@ async saveCredentialsToFile(filePath, newData) {
             const nonCachedInputTokens = Math.max(0, inputTokens - cacheCreationTokens - cacheReadTokens);
 
             // 5. 发送 message_delta 事件
-            // stop_reason 优先级: tool_use > max_tokens(被截断/仅 thinking) > end_turn
-            const stopReason = toolCalls.length > 0 ? "tool_use"
-                             : wasTruncated ? "max_tokens"
-                             : emittedOnlyThinking ? "max_tokens"
-                             : "end_turn";
+            // 重要：不要把上游截断 / thinking-only 报为 max_tokens，
+            // 否则 Claude Code 客户端会误判为输出超 64K 上限并弹错误对话框。
+            // 上游截断和 thinking-only 在语义上更接近自然结束 (end_turn) + 日志告警。
+            const stopReason = toolCalls.length > 0 ? "tool_use" : "end_turn";
             if (wasTruncated && toolCalls.length === 0) {
-                logger.warn(`[Kiro Stream] Reporting stop_reason=max_tokens due to truncated upstream stream`);
+                logger.warn(`[Kiro Stream] Upstream truncated; reporting stop_reason=end_turn (avoid client 64K max_tokens error)`);
+            }
+            if (emittedOnlyThinking) {
+                logger.warn(`[Kiro Stream] Thinking-only response; reporting stop_reason=end_turn`);
             }
             yield {
                 type: "message_delta",
@@ -3116,9 +3227,8 @@ async saveCredentialsToFile(filePath, newData) {
             }
 
             if (hasThinkingContent && !hasTextContent && (!toolCalls || toolCalls.length === 0)) {
-                contentArray.push({ type: 'text', text: ' ' });
-                outputTokens += this.countTextTokens(' ');
-                stopReason = "max_tokens";
+                logger.warn('[Kiro] Thinking-only response in non-streaming mode; no fallback text injected, keeping stop_reason=end_turn');
+                // 不再设置 stopReason = "max_tokens"，避免 Claude Code 客户端误触发 64K 上限错误
             }
 
             return {
