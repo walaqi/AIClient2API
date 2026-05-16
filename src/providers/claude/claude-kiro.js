@@ -2191,9 +2191,10 @@ async saveCredentialsToFile(filePath, newData) {
         const toolNameMaps = requestData._kiroToolNameMaps;
 
         const token = this.accessToken;
+        const invocationId = uuidv4();
         const headers = {
             'Authorization': `Bearer ${token}`,
-            'amz-sdk-invocation-id': `${uuidv4()}`,
+            'amz-sdk-invocation-id': invocationId,
         };
 
         const requestUrl = model.startsWith('amazonq') ? this.amazonQUrl : this.baseUrl;
@@ -2225,12 +2226,16 @@ async saveCredentialsToFile(filePath, newData) {
             let totalRawBytes = 0;
             let chunkCount = 0;
 
-            const captureRawPath = process.env.KIRO_CAPTURE_RAW;
+            const captureRawDir = process.env.KIRO_CAPTURE_RAW;
             let captureFs = null;
-            if (captureRawPath) {
+            let captureFilePath = null;
+            if (captureRawDir) {
                 const fsModule = await import('fs');
                 captureFs = fsModule.default || fsModule;
-                logger.info(`[Kiro Stream] KIRO_CAPTURE_RAW enabled, writing to ${captureRawPath}`);
+                captureFs.mkdirSync(captureRawDir, { recursive: true });
+                const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+                captureFilePath = `${captureRawDir}/kiro-${stamp}-${invocationId.substring(0, 8)}.bin`;
+                logger.info(`[Kiro Stream] KIRO_CAPTURE_RAW enabled, writing to ${captureFilePath}`);
             }
             // 监听 underlying socket 的 abort/error,作为截断信号源之一
             const onSocketAborted = () => { socketAborted = true; };
@@ -2266,8 +2271,8 @@ async saveCredentialsToFile(filePath, newData) {
                         chunkCount++;
                     }
 
-                    if (captureFs) {
-                        try { captureFs.appendFileSync(captureRawPath, chunkBuf); } catch (e) { /* ignore */ }
+                    if (captureFs && captureFilePath) {
+                        try { captureFs.appendFileSync(captureFilePath, chunkBuf); } catch (e) { /* ignore */ }
                     }
 
                     // 已知 O(n²) 拼接，本轮不做 BufferList 优化；当前样本 < 1MB 无感，
