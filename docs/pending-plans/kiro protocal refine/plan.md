@@ -408,3 +408,147 @@ describe('事件分发 (payload shape → event type)', () => {
 - Kiro 的 error / exception 控制帧不再被静默吞，转为 WARN 日志便于排查（D3）
 - sync-loss 场景有明确保护和告警，不会让脏 buffer 永远卡死后续 chunk（D2）
 - fixture 抓取流程不再依赖人工删代码（D5）
+
+---
+
+# Round 2: Fixture 抓取与集成测试 (轻量方案)
+
+## R2 Context
+
+Round 1 完成解析器重写并经用户实测有效，并在 [docs/pending-plans/kiro protocal refine/code-review-1.md](docs/pending-plans/kiro protocal refine/code-review-1.md) 的 issue 2/3/4 全部修订完成（21/21 测试通过）。Round 2 补完 plan 3.3 主动延后的 fixture 集成测试。
+
+当前 `KIRO_CAPTURE_RAW` 语义有缺陷：`appendFileSync` + 单一固定路径意味着**多次请求的 chunk 会串成同一个 .bin**，整体既不是合法单 stream，也不能被 `parseAwsEventStreamFrames(buf)` 当 fixture 解。
+
+走轻量路径：把 `KIRO_CAPTURE_RAW` 改成"目录路径"，每请求一文件；不引入管理端 UI（UI 方案另起 PR）。
+
+## R2 改动
+
+### R2-1: capture 机制改造 — 目录语义 + 每请求一文件
+
+复用 [claude-kiro.js:2196](src/providers/claude/claude-kiro.js#L2196) 已经生成的 `amz-sdk-invocation-id` uuid 作为请求 ID。
+
+**Step 1**：把 [claude-kiro.js:2196-2198](src/providers/claude/claude-kiro.js#L2196-L2198) 的 uuid 提到局部变量，方便后面文件名复用：
+
+```js
+const invocationId = uuidv4();
+const headers = {
+    'Authorization': `Bearer ${token}`,
+    'amz-sdk-invocation-id': invocationId,
+};
+```
+
+**Step 2**：[claude-kiro.js:2228-2234](src/providers/claude/claude-kiro.js#L2228-L2234) capture 初始化改 directory 语义：
+
+```js
+const captureRawDir = process.env.KIRO_CAPTURE_RAW;
+let captureFs = null;
+let captureFilePath = null;
+if (captureRawDir) {
+    const fsModule = await import('fs');
+    captureFs = fsModule.default || fsModule;
+    captureFs.mkdirSync(captureRawDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    captureFilePath = `${captureRawDir}/kiro-${stamp}-${invocationId.substring(0, 8)}.bin`;
+    logger.info(`[Kiro Stream] KIRO_CAPTURE_RAW enabled, writing to ${captureFilePath}`);
+}
+```
+
+**Step 3**：[claude-kiro.js:2269-2270](src/providers/claude/claude-kiro.js#L2269-L2270) chunk 写入改用 `captureFilePath`：
+
+```js
+if (captureFs && captureFilePath) {
+    try { captureFs.appendFileSync(captureFilePath, chunkBuf); } catch (e) { /* ignore */ }
+}
+```
+
+**不保留对"单文件路径"的向后兼容**：`KIRO_CAPTURE_RAW` 是 round 1 才新增，未正式发布，无外部用户依赖。
+
+### R2-2: 新增 fixture 集成测试 — `describe.skip` 优雅降级
+
+新文件 `tests/providers/claude-kiro-parser-fixture.test.js`。
+
+如果对应 fixture 不存在，对应 suite 自动 skip，避免 CI 在 fixture 提交前红灯。
+
+```js
+import * as fs from 'fs';
+import * as path from 'path';
+import { parseAwsEventStreamFrames } from '../../src/providers/claude/aws-event-stream-parser.js';
+
+const FIXTURE_DIR = path.join(process.cwd(), 'tests/fixtures/kiro-stream');
+
+function fixtureSuite(name, file, assertions) {
+    const filePath = path.join(FIXTURE_DIR, file);
+    const d = fs.existsSync(filePath) ? describe : describe.skip;
+    d(`fixture: ${name}`, () => {
+        test('完整解析无 remaining + 场景断言', () => {
+            const buf = fs.readFileSync(filePath);
+            const { events, remaining } = parseAwsEventStreamFrames(buf);
+            expect(remaining.length).toBe(0);
+            // 反向断言：events 数量必须显著大于 0，避免「提前 break + remaining=0」的虚假绿
+            expect(events.length).toBeGreaterThan(2);
+            assertions(events);
+        });
+    });
+}
+
+fixtureSuite('pure-text', 'pure-text.bin', (events) => {
+    const types = new Set(events.map(e => e.type));
+    expect(types.has('content')).toBe(true);
+    expect(types.has('metering')).toBe(true);
+});
+
+fixtureSuite('reasoning-text', 'reasoning-text.bin', (events) => {
+    expect(new Set(events.map(e => e.type)).has('reasoning')).toBe(true);
+});
+
+fixtureSuite('single-tool', 'single-tool.bin', (events) => {
+    expect(events.filter(e => e.type === 'toolUse').length).toBeGreaterThanOrEqual(1);
+    expect(events.filter(e => e.type === 'toolUseStop').length).toBeGreaterThanOrEqual(1);
+});
+
+fixtureSuite('multi-tool', 'multi-tool.bin', (events) => {
+    const toolUses = events.filter(e => e.type === 'toolUse');
+    expect(toolUses.length).toBeGreaterThanOrEqual(2);   // 原 bug 复现场景
+    expect(events.length).toBeGreaterThan(toolUses.length * 2);
+});
+```
+
+### R2-3: gitignore 检查
+
+[.gitignore](.gitignore) 当前忽略 `logs/` `node_modules`、各类 token / config。`tests/fixtures/kiro-stream/*.bin` 不在忽略列表内，默认会被 git add（这是期望行为）。临时抓取目录 `/tmp/kiro-capture/` 在 `/tmp` 下，不需要 ignore。无需改动。
+
+## R2 验证步骤
+
+1. **改造代码** R2-1（3 处 edit），跑：`npx jest tests/providers/claude-kiro-parser.test.js --no-coverage` 21/21 应继续通过（不影响 round 1 测试）
+2. **新增 fixture 测试文件** R2-2，跑：`npx jest tests/providers/claude-kiro-parser-fixture.test.js --no-coverage` 此时 4 个 suite 全部 `skipped`（fixture 还没抓）
+3. **抓 fixture**（用户操作）：
+   ```bash
+   mkdir -p /tmp/kiro-capture
+   KIRO_CAPTURE_RAW=/tmp/kiro-capture npm start
+   ```
+4. **顺序触发 4 个场景**（每个等响应完成再发下一个，避免文件命名时间戳冲突）：
+   - **pure-text**：问 "什么是闭包"
+   - **reasoning-text**：让 Claude 分析 "归并排序的时间复杂度推导"（鼓励 thinking）
+   - **single-tool**：让 Claude "读 README.md 第一段"
+   - **multi-tool**：让 Claude "grep 项目里所有 logger.warn 然后告诉我前 3 处"（**只读不写**）
+5. **整理为 fixture**：
+   ```bash
+   ls -lat /tmp/kiro-capture/   # 按时间倒序，最新在上
+   mkdir -p tests/fixtures/kiro-stream
+   # 按抓取时间从老到新匹配上面 4 个场景，重命名搬过去：
+   cp /tmp/kiro-capture/<场景1的bin> tests/fixtures/kiro-stream/pure-text.bin
+   cp /tmp/kiro-capture/<场景2的bin> tests/fixtures/kiro-stream/reasoning-text.bin
+   cp /tmp/kiro-capture/<场景3的bin> tests/fixtures/kiro-stream/single-tool.bin
+   cp /tmp/kiro-capture/<场景4的bin> tests/fixtures/kiro-stream/multi-tool.bin
+   ```
+6. **跑 fixture 测试**：`npx jest tests/providers/claude-kiro-parser-fixture.test.js --no-coverage` 4 个 suite 应全绿，**无 skipped**
+7. **跑全量测试**：`npm test` 应无解析器相关回归
+8. **检查 fixture 大小**：`ls -la tests/fixtures/kiro-stream/` 单文件 < 100 KB（避免仓库膨胀）；超大就重抓更精简的场景
+9. **commit**：fixture .bin + R2 代码改动 + 测试文件一起 commit，进入 PR
+
+## R2 范围外（明确推迟）
+
+- **管理端 UI 抓取面板**：另起 PR；初版方案见上一轮回复（fixture-capture.js + section-fixtures.html + 内存开关 + 列表/下载/删除）
+- **PII 内容审查**：用户决定跳过
+- **抓取磁盘上限保护**：轻量方案不实现，依赖手动控制（`/tmp` 满了系统会抗议）
+- **多 provider 复用 capture 抽象**：UI 方案才需要；当前 Kiro 单 provider 用环境变量足够
