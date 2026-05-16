@@ -17,4 +17,6 @@ api-potluck-keys.json
 api-potluck-data.json
 model-usage-stats.json
 AGENTS.md
+configs/pwd
+configs/model-prices.json
 
