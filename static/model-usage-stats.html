@@ -6,11 +6,71 @@
   <meta name="theme-color" content="#059669">
   <title>模型用量统计</title>
   <link rel="stylesheet" href="app/base.css">
+  <link rel="stylesheet" href="app/mobile.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     body {
       background: var(--bg-secondary);
       min-height: 100vh;
+    }
+
+    /* 响应式基础调整 */
+    @media (max-width: 768px) {
+      .navbar-inner, .main {
+        padding: 0 12px;
+      }
+      .navbar-inner {
+        height: 60px;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 12px;
+      }
+      .brand-icon { width: 32px; height: 32px; border-radius: 8px; }
+      .brand-title { font-size: 15px; }
+      .brand-sub { display: none; }
+      
+      .nav-actions { width: auto; gap: 8px; }
+      .nav-btn { min-width: 40px; padding: 0 10px; border-radius: 10px; }
+      .nav-btn span { display: none; }
+      .theme-toggle { border-radius: 10px; }
+      
+      .hero { grid-template-columns: 1fr !important; gap: 16px; }
+      .hero-main { padding: 20px; }
+      .hero-main h1 { font-size: 22px; }
+      .copy { font-size: 13px; }
+      
+      .auth { padding: 20px; }
+      .row { flex-direction: column; }
+      .row .btn { width: 100%; }
+      
+      .stats { grid-template-columns: 1fr 1fr !important; gap: 12px !important; }
+      .stats article:last-child { grid-column: span 2; }
+      .card { padding: 16px; }
+      .card-value { font-size: 20px; }
+      .note { font-size: 11px; }
+      
+      .split { grid-template-columns: 1fr !important; gap: 16px; }
+      
+      .providers { grid-template-columns: 1fr !important; gap: 12px; }
+      .provider { padding: 16px; }
+      .provider-head { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .mini { grid-template-columns: 1fr 1fr !important; gap: 8px; }
+      .mini-box { background: var(--bg-secondary); padding: 8px; border-radius: 6px; }
+      
+      .tools { flex-direction: column; align-items: stretch !important; gap: 12px; }
+      .tool-row { flex-direction: column; gap: 10px; }
+      
+      .table-card .tools { padding: 16px; }
+      th, td { padding: 12px 10px; font-size: 12px; }
+    }
+
+    @media (max-width: 480px) {
+      .stats { grid-template-columns: 1fr !important; }
+      .stats article { grid-column: span 1 !important; }
+      .mini { grid-template-columns: 1fr !important; }
+      .brand-title { font-size: 15px; }
+      h1 { font-size: 20px; }
     }
 
     .navbar {
@@ -509,24 +569,33 @@
       font-family: var(--font-mono);
     }
 
-    .card.green {
-      border-top: 4px solid #10b981;
-    }
+    .card.green { border-top: 4px solid var(--success-color); }
+    .card.blue { border-top: 4px solid var(--info-color); }
+    .card.cyan { border-top: 4px solid #06b6d4; }
+    .card.indigo { border-top: 4px solid var(--indigo-500); }
+    .card.orange { border-top: 4px solid var(--warning-color); }
 
-    .card.blue {
-      border-top: 4px solid #3b82f6;
-    }
+    [data-theme="dark"] .card.cyan { border-top-color: #22d3ee; }
+    [data-theme="dark"] .card.indigo { border-top-color: var(--indigo-600); }
 
-    .card.cyan {
-      border-top: 4px solid #06b6d4;
+    /* 暗色模式下的 Hero 面板适配 */
+    [data-theme="dark"] .hero-main {
+      background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+      border-color: var(--border-color);
     }
-
-    .card.indigo {
-      border-top: 4px solid #6366f1;
+    [data-theme="dark"] .hero-main h1,
+    [data-theme="dark"] .hero-main .copy,
+    [data-theme="dark"] .hero-main .eyebrow,
+    [data-theme="dark"] .hero-main .tag {
+      color: var(--text-primary);
     }
-
-    .card.orange {
-      border-top: 4px solid #f59e0b;
+    [data-theme="dark"] .hero-main .eyebrow,
+    [data-theme="dark"] .hero-main .tag {
+      background: var(--bg-secondary);
+      border-color: var(--border-color);
+    }
+    [data-theme="dark"] .hero-main::after {
+      opacity: 0.05;
     }
 
     .bars {
@@ -795,7 +864,7 @@
       </article>
     </section>
     
-    <section class="split" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+    <section class="split">
       <div class="panel calendar-panel" style="margin-bottom: 0;">
         <div class="calendar-header">
           <h2 class="section-title" style="margin:0; font-size: 16px;"><i class="fas fa-calendar-days"></i> Token 使用趋势 (3个月)</h2>

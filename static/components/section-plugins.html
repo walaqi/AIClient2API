@@ -2,65 +2,138 @@
 <!-- Plugins Section -->
 <section id="plugins" class="section" aria-labelledby="plugins-title">
     <h2 id="plugins-title" data-i18n="plugins.title">插件管理</h2>
-    <div class="plugins-panel">
-        <div class="plugins-description">
-            <div class="highlight-note">
-                <i class="fas fa-info-circle"></i>
-                <span data-i18n="plugins.description">插件系统允许您扩展系统功能，启用或禁用插件需要重启服务才能生效</span>
+    
+    <!-- 标签页切换 -->
+    <div class="tabs-container">
+        <div class="tab-item active" data-tab="installed" data-i18n="plugins.tabs.installed">已安装</div>
+        <div class="tab-item" data-tab="market" data-i18n="plugins.tabs.market">插件市场</div>
+    </div>
+
+    <div id="installedTab" class="tab-content active">
+        <div class="plugins-panel">
+            <div class="plugins-description">
+                <div class="highlight-note">
+                    <i class="fas fa-info-circle"></i>
+                    <span data-i18n="plugins.description">插件系统允许您扩展系统功能，启用或禁用插件需要重启服务才能生效</span>
+                </div>
             </div>
-        </div>
-        
-        <!-- 插件统计 -->
-        <div class="stats-grid plugins-stats">
-            <div class="stat-card">
-                <div class="stat-icon">
+            
+            <!-- 插件统计 -->
+            <div class="stats-grid plugins-stats">
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-puzzle-piece"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="totalPlugins">0</h3>
+                        <p data-i18n="plugins.stats.total">总插件数</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="enabledPlugins">0</h3>
+                        <p data-i18n="plugins.stats.enabled">已启用</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon">
+                        <i class="fas fa-times-circle"></i>
+                    </div>
+                    <div class="stat-info">
+                        <h3 id="disabledPlugins">0</h3>
+                        <p data-i18n="plugins.stats.disabled">已禁用</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 插件操作按钮 -->
+            <div class="plugins-controls">
+                <button class="btn btn-primary" id="refreshPluginsBtn" aria-label="Refresh Plugins" data-i18n-aria-label="plugins.refresh">
+                    <i class="fas fa-sync-alt"></i> <span data-i18n="plugins.refresh">刷新插件列表</span>
+                </button>
+            </div>
+            
+            <!-- 插件加载状态 -->
+            <div class="plugins-loading" id="pluginsLoading" style="display: none;">
+                <i class="fas fa-spinner fa-spin"></i> <span data-i18n="plugins.loading">正在加载插件列表...</span>
+            </div>
+            
+            <!-- 插件列表 -->
+            <div class="plugins-list-container">
+                <div id="pluginsList" class="plugins-list">
+                    <!-- 插件列表将在这里动态生成 -->
+                </div>
+                <div class="plugins-empty" id="pluginsEmpty">
                     <i class="fas fa-puzzle-piece"></i>
-                </div>
-                <div class="stat-info">
-                    <h3 id="totalPlugins">0</h3>
-                    <p data-i18n="plugins.stats.total">总插件数</p>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">
-                    <i class="fas fa-check-circle"></i>
-                </div>
-                <div class="stat-info">
-                    <h3 id="enabledPlugins">0</h3>
-                    <p data-i18n="plugins.stats.enabled">已启用</p>
-                </div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-icon">
-                    <i class="fas fa-times-circle"></i>
-                </div>
-                <div class="stat-info">
-                    <h3 id="disabledPlugins">0</h3>
-                    <p data-i18n="plugins.stats.disabled">已禁用</p>
+                    <p data-i18n="plugins.empty">暂无已安装的插件</p>
                 </div>
             </div>
         </div>
-        
-        <!-- 插件操作按钮 -->
-        <div class="plugins-controls">
-            <button class="btn btn-primary" id="refreshPluginsBtn" aria-label="Refresh Plugins" data-i18n-aria-label="plugins.refresh">
-                <i class="fas fa-sync-alt"></i> <span data-i18n="plugins.refresh">刷新插件列表</span>
-            </button>
-        </div>
-        
-        <!-- 插件加载状态 -->
-        <div class="plugins-loading" id="pluginsLoading" style="display: none;">
-            <i class="fas fa-spinner fa-spin"></i> <span data-i18n="plugins.loading">正在加载插件列表...</span>
-        </div>
-        
-        <!-- 插件列表 -->
-        <div class="plugins-list-container">
-            <div id="pluginsList" class="plugins-list">
-                <!-- 插件列表将在这里动态生成 -->
+    </div>
+
+    <div id="marketTab" class="tab-content">
+        <div class="market-panel">
+            <div class="plugins-description">
+                <div class="highlight-note">
+                    <i class="fas fa-store"></i>
+                    <span data-i18n="plugins.market.description">在这里发现并安装官方或社区提供的增强插件</span>
+                </div>
             </div>
-            <div class="plugins-empty" id="pluginsEmpty">
-                <i class="fas fa-puzzle-piece"></i>
-                <p data-i18n="plugins.empty">暂无已安装的插件</p>
+            
+            <div class="market-controls">
+                <div style="display:flex; gap:10px; flex:1; max-width:500px">
+                    <input id="marketUrlInput" class="form-control" style="height:38px" placeholder="输入远程 market.json 地址 (可选)">
+                    <button class="btn btn-secondary" id="refreshMarketBtn" style="white-space:nowrap">
+                        <i class="fas fa-sync-alt"></i> <span data-i18n="plugins.market.refresh">刷新市场</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="plugins-loading" id="marketLoading" style="display: none;">
+                <i class="fas fa-spinner fa-spin"></i> <span data-i18n="plugins.market.loading">正在加载插件市场...</span>
+            </div>
+
+            <div class="market-list-container">
+                <div id="marketList" class="plugins-list">
+                    <!-- 市场列表将在这里动态生成 -->
+                </div>
+                <div class="plugins-empty" id="marketEmpty">
+                    <i class="fas fa-store"></i>
+                    <p data-i18n="plugins.market.empty">市场暂无可用插件</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 支付弹窗 -->
+    <div id="paymentModal" class="modal">
+        <div class="modal-content" style="max-width: 450px">
+            <div class="modal-header">
+                <h2 id="paymentTitle" data-i18n="plugins.payment.title">购买插件</h2>
+                <button class="modal-close" id="closePaymentModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div style="text-align: center; margin-bottom: 1.5rem">
+                    <div id="paymentPrice" style="font-size: 2rem; font-weight: 700; color: var(--primary-color); margin-bottom: 0.5rem"></div>
+                    <div id="paymentDesc" style="color: var(--text-secondary); font-size: 0.875rem"></div>
+                </div>
+                
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; background: var(--bg-secondary); padding: 1.5rem; border-radius: 0.5rem">
+                    <img id="paymentQR" src="" alt="QR Code" style="width: 200px; height: 200px; border: 1px solid var(--border-color); padding: 5px; background: white">
+                    <div style="font-size: 0.875rem; color: var(--text-primary)" data-i18n="plugins.payment.scanToPay">请扫码支付，或点击下方按钮前往支付页</div>
+                    <a id="paymentLink" href="#" target="_blank" class="btn btn-secondary" style="width: 100%" data-i18n="plugins.payment.goPage">前往支付页面</a>
+                </div>
+
+                <div style="margin-top: 1.5rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem">
+                    <p style="font-size: 0.875rem; margin-bottom: 1rem" data-i18n="plugins.payment.uploadGuide">完成购买后，请上传获得的插件 ZIP 包进行安装：</p>
+                    <button id="triggerUploadBtn" class="btn btn-primary" style="width: 100%">
+                        <i class="fas fa-upload"></i> <span data-i18n="plugins.payment.uploadBtn">上传并安装插件</span>
+                    </button>
+                    <input type="file" id="pluginFileInput" accept=".zip" style="display: none">
+                </div>
             </div>
         </div>
     </div>

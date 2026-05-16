@@ -42,7 +42,16 @@
       PackyCode は信頼性が高く効率的な API リレーサービスプロバイダーであり、Claude Code、Codex、Gemini などのリレーサービス提供しています。PackyCode は当ソフトウェアユーザーに特别割引を提供しています：<a href="https://www.packyapi.com/register?aff=AIClient2API">このリンクから登録</a>し、チャージ時に <strong>AIClient2API</strong> プロモーションコードを入力すると <strong>10% オフ</strong>になります。
     </td>
   </tr>
-<!--
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://visioncoder.com">
+        <img src="static/visioncoder.png" alt="VisionCoder Sponsor" width="180">
+      </a>
+    </td>
+    <td width="75%" align="left" valign="middle">
+      VisionCoder による本プロジェクトへのスポンサーに感謝します！VisionCoder 開発プラットフォームは信頼性が高く効率的な API 中継サービスプロバイダーであり、Claude Code、Codex、Gemini などの主要な AI モデルへのアクセスを提供しています。開発者やチームが AI 機能をより簡単に統合し、生産性を向上させるのを支援します。VisionCoder は本ソフトウェアのユーザー向けに期間限定の <a href="https://visioncoder.com">Token Plan</a> 特典を提供しています：<strong>1ヶ月の購入で1ヶ月分を無料で進呈</strong>。
+    </td>
+  </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
       <a href="https://www.aicodemirror.com/register?invitecode=5BUE62">
@@ -53,7 +62,7 @@
       AICodeMirror の本プロジェクトへのスポンサーシップに感謝します！AICodeMirror は、Claude Code / Codex / Gemini CLI 向けに公式の高安定性リレーサービスを提供しており、企業レベルの同時実行性、迅速な請求書発行、24時間365日の専用技術サポートを備えています。Claude Code / Codex / Gemini の公式チャンネルを、元の価格の 38% / 2% / 9% で利用でき、チャージ時にはさらなる割引もあります！AICodeMirror は AIClient2API ユーザーに特別な特典を提供しています：<a href="https://www.aicodemirror.com/register?invitecode=5BUE62">このリンクから登録</a>すると、初回チャージが <strong>20% オフ</strong>になり、法人のお客様は最大 25% オフになります！
     </td>
   </tr>
--->
+
 <!--
   <tr>
     <td width="25%" align="center" valign="middle">
@@ -66,16 +75,6 @@
     </td>
   </tr>
 -->
-  <tr>
-    <td width="25%" align="center" valign="middle">
-      <a href="https://visioncoder.com">
-        <img src="static/visioncoder.png" alt="VisionCoder Sponsor" width="180">
-      </a>
-    </td>
-    <td width="75%" align="left" valign="middle">
-      VisionCoder による本プロジェクトへのスポンサーに感謝します！VisionCoder 開発プラットフォームは信頼性が高く効率的な API 中継サービスプロバイダーであり、Claude Code、Codex、Gemini などの主要な AI モデルへのアクセスを提供しています。開発者やチームが AI 機能をより簡単に統合し、生産性を向上させるのを支援します。VisionCoder は本ソフトウェアのユーザー向けに期間限定の <a href="https://visioncoder.com">Token Plan</a> 特典を提供しています：<strong>1ヶ月の購入で1ヶ月分を無料で進呈</strong>。
-    </td>
-  </tr>
 <!--
   <tr>
     <td width="25%" align="center" valign="middle">
@@ -103,7 +102,7 @@
 
 ## 🚀 概要
 
-`AIClient2API` はクライアント制限を突破するAPIプロキシサービスで、Gemini、Antigravity、Codex, Grok、Kiroなど、元々クライアント内でのみ使用可能な無料大規模モデルを、あらゆるアプリケーションから呼び出せる標準OpenAI互換インターフェースに変換します。Node.jsをベースに構築され、OpenAI、Claude、Geminiの3大プロトコル間のインテリジェント変換をサポートし、Cherry-Studio、NextChat、Clineなどのツールで、Claude Opus 4.5、Gemini 3.0 Proなどの高度なモデルを大規模に無料で使用できるようにします。プロジェクトはストラテジーパターンとアダプターパターンに基づくモジュラーアーキテクチャを採用し、アカウントプール管理、インテリジェントポーリング、自動フェイルオーバー、ヘルスチェック機構を内蔵し、99.9%のサービス可用性を保証します。
+`AIClient2API` はクライアント制限を突破するAPIプロキシサービスで、Gemini、Antigravity、Codex, Grok、Kiroなど、元々クライアント内でのみ使用可能な無料大規模モデルを、あらゆるアプリケーションから呼び出せる標準OpenAI互換インターフェースに変換します。Node.jsをベースに構築され、OpenAI、Claude、Geminiの3大プロトコル間のインテリジェント変換をサポートし、Cherry-Studio、NextChat、Clineなどのツールで、Claude Opus、Gemini Proなどの高度なモデルを大規模に無料で使用できるようにします。プロジェクトはストラテジーパターンとアダプターパターンに基づくモジュラーアーキテクチャを採用し、アカウントプール管理、インテリジェントポーリング、自動フェイルオーバー、ヘルスチェック機構を内蔵し、99.9%のサービス可用性を保証します。
 
 > [!NOTE]
 > **🎉 重要なマイルストーン**
@@ -117,7 +116,7 @@
 > 
 > - **2026.05.04 (v3.0.0)** - **マイルストーンアップデート：高度な AI 統合と自己発見アーキテクチャ**。自動化された Skill ガイドとリモート `/api/help`、`/api/example` エンドポイントを追加し、AI 代理が 50 以上の全 API エンドポイントをシームレスに理解・操作できるようになりました。CLI と REST API の出力結果を完全に統一し、構造化 JSON サポートを強化しました。
 > - **2026.04.29** - OpenAI 標準の画像生成 (`/v1/images/generations`) および画像編集 (`/v1/images/edits`) インターフェースを完全にサポート。OpenAI 形式のリクエストを各モデルのネイティブ画像生成プロトコルに自動変換し、プロバイダープールのポーリングや自动リトライメカニズムに完全対応。マルチモーダル制作の安定性を大幅に向上。
-> - **2026.03.02** - Grokプロトコルサポートを追加：Cookie/SSO方式でxAI Grokシリーズモデル（Grok 3/4）へのアクセスに対応し、マルチモーダル入力、画像/動画生成、自動トークンリフレッシュ、ストリーミング出力をサポート
+> - **2026.03.02** - Grokプロトコルサポートを追加：Cookie/SSO方式でxAI Grokシリーズモデル（Grok）へのアクセスに対応し、マルチモーダル入力、画像/動画生成、自動トークンリフレッシュ、ストリーミング出力をサポート
 > - **2026.01.26** - Codexプロトコルサポートを追加：OpenAI Codex OAuth認証での接続に対応
 > - **2026.01.25** - AI 監視プラグインの強化：AI プロトコル変換前後のリクエストパラメータとレスポンスの監視をサポート。ログ管理の最適化：統一されたログ形式、ビジュアル設定
 > - **2026.01.15** - プロバイダープールマネージャーの最適化：非同期リフレッシュキューメカニズム、バッファキュー重複排除、グローバル並行制御、ノードウォームアップと自動期限切れ検出を追加
@@ -125,10 +124,10 @@
 > - **2025.12.30** - メインプロセス管理と自動更新機能を追加
 > - **2025.12.25** - 設定ファイル統一管理：すべての設定を `configs/` ディレクトリに集約。Dockerユーザーはマウントパスを `-v "ローカルパス:/app/configs"` に更新が必要
 > - **2025.12.11** - Dockerイメージが自動的にビルドされ、Docker Hubで公開されました: [justlikemaki/aiclient-2-api](https://hub.docker.com/r/justlikemaki/aiclient-2-api)
-> - **2025.11.30** - Antigravityプロトコルサポートの追加、Google内部インターフェース経由でGemini 3 Pro、Claude Sonnet 4.5などのモデルへのアクセスをサポート
+> - **2025.11.30** - Antigravityプロトコルサポートの追加、Google内部インターフェース経由でGemini Pro、Claude Sonnetなどのモデルへのアクセスをサポート
 > - **2025.11.11** - Web UI管理コントロールコンソールの追加、リアルタイム設定管理と健康状態モニタリングをサポート
-> - **2025.11.06** - Gemini 3 プレビュー版のサポートを追加、モデル互換性とパフォーマンス最適化を向上
-> - **2025.10.18** - Kiroオープン登録、新規アカウントに500クレジット付与、Claude Sonnet 4.5を完全サポート
+> - **2025.11.06** - Gemini プレビュー版のサポートを追加、モデル互換性とパフォーマンス最適化を向上
+> - **2025.10.18** - Kiroオープン登録、新規アカウントに500クレジット付与、Claude Sonnetを完全サポート
 > - **2025.08.29** - アカウントプール管理機能をリリース、マルチアカウントポーリング、自動フェイルオーバー、自動ダウングレード戦略をサポート
 >   - 設定方法：config.jsonに`PROVIDER_POOLS_FILE_PATH`パラメータを追加
 >   - 参考設定：[provider_pools.json](./configs/provider_pools.json.example)
@@ -158,7 +157,7 @@
 >   ```
 
 ### 🎯 統一アクセス、ワンストップ管理
-*   **マルチモデル統一インターフェース**：標準OpenAI互換プロトコルを通じて、一度の設定でGemini、Claude、Grok、Codex、 K2、MiniMax M2などの主流大規模モデルにアクセス
+*   **マルチモデル統一インターフェース**：標準OpenAI互換プロトコルを通じて、一度の設定でGemini、Claude、Grok、Codex、Kimi、MiniMaxなどの主流大規模モデルにアクセス
 *   **柔軟な切り替えメカニズム**：Pathルーティング、起動パラメータ、環境変数の3つの方法で動的にモデルを切り替え、異なるシナリオのニーズに対応
 *   **ゼロコスト移行**：OpenAI API仕様と完全互換、Cherry-Studio、NextChat、Clineなどのツールを変更なしで使用可能
 *   **マルチプロトコルインテリジェント変換**：OpenAI、Claude、Geminiの3大プロトコル間のインテリジェント変換をサポートし、クロスプロトコルモデル呼び出しを実現
@@ -166,7 +165,7 @@
 ### 🚀 制限を突破、効率を向上
 *   **公式制限の回避**：OAuth認証メカニズムを利用して、Gemini、Antigravityなどの無料APIのレート制限と割り当て制限を効果的に突破
 *   **TLS 指紋の回避**：内蔵の TLS Sidecar (Go uTLS) によりブラウザの特徴をシミュレートし、Grok などのサービスの Cloudflare 403 ブロックを効果的に回避
-*   **無料高度モデル**：Kiro APIモードでClaude Opus 4.5を無料使用、使用コストを削減
+*   **無料高度モデル**：Kiro APIモードでClaude Opusを無料使用、使用コストを削減
 *   **インテリジェントアカウントプールスケジューリング**：マルチアカウントポーリング、自動フェイルオーバー、設定ダウングレードをサポートし、99.9%のサービス可用性を保証
 
 ### 🛡️ 安全で制御可能、データ透明
@@ -322,10 +321,10 @@ docker compose up -d
 
 #### 最新モデルサポート
 以下の最新大規模モデルをシームレスにサポート、Web UIまたは[`config.json`](./configs/config.json)で対応するエンドポイントを設定するだけで使用可能：
-*   **Grok 3 / Grok 4** - xAIのフラッグシップモデル。Grok Cookie/SSO経由でサポートされ、思考モデル、画像生成、動画生成に対応
-*   **Claude 4.5 Opus** - Anthropic史上最強モデル、Kiro、Antigravity経由でサポート
-*   **Gemini 3 Pro** - Google次世代アーキテクチャプレビュー版、Gemini、Antigravity経由でサポート
-*   **Kimi K2 / MiniMax M2** - 国内トップフラッグシップモデルの同期サポート、カスタムOpenAI、Claude経由でサポート
+*   **Grok** - xAIのフラッグシップモデル。Grok Cookie/SSO経由でサポートされ、思考モデル、画像生成、動画生成に対応
+*   **Claude Opus** - Anthropic史上最強モデル、Kiro、Antigravity経由でサポート
+*   **Gemini Pro** - Google次世代アーキテクチャプレビュー版、Gemini、Antigravity経由でサポート
+*   **Kimi / MiniMax** - 国内トップフラッグシップモデルの同期サポート、カスタムOpenAI、Claude経由でサポート
 
 ---
 
@@ -409,7 +408,7 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
 1. **SSOトークンの取得**: [Grok公式サイト](https://grok.com/)にログインし、ブラウザの開発者ツールの Application -> Cookies から `sso` の値をコピーします。
 2. **設定の入力**: Web UIの「設定管理」ページ、または設定ファイルを直接編集して、トークンを `GROK_COOKIE_TOKEN` に入力します。
 3. **サポート機能**:
-   - チャットおよび思考モデル (Grok 3 Thinking)
+   - チャットおよび思考モデル (Grok Thinking)
    - 画像生成 (Grok Imagine)
    - 動画生成 (Grok Video)
 4. **注意事項**: ブロックを避けるため、`GROK_USER_AGENT` がCookie取得時と同じブラウザのものであることを確認してください。
@@ -433,7 +432,7 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
 |------|---------|------|
 | **Gemini** | `~/.gemini/oauth_creds.json` | OAuth認証情報 |
 | **Kiro** | `~/.aws/sso/cache/kiro-auth-token.json` | Kiro認証トークン |
-| **Antigravity** | `~/.antigravity/oauth_creds.json` | Antigravity OAuth認証情報 (Claude 4.5 Opus サポート) |
+| **Antigravity** | `~/.antigravity/oauth_creds.json` | Antigravity OAuth認証情報 (Claude Opus サポート) |
 | **Codex** | `~/.codex/oauth_creds.json` | Codex OAuth認証情報 |
 
 > **説明**：`~`はユーザーホームディレクトリを表します（Windows: `C:\Users\ユーザー名`、Linux/macOS: `/home/ユーザー名`または`/Users/ユーザー名`）

@@ -249,6 +249,12 @@ function addReplacementRow(oldVal = '', newVal = '') {
 async function loadConfiguration() {
     try {
         initConfigPageHelpers();
+
+        // 确保提供商配置已加载，因为渲染配置项（如 MODEL_PROVIDER 标签）依赖它
+        if (currentProviderConfigs === null && typeof window.loadProviders === 'function') {
+            await window.loadProviders();
+        }
+
         const data = await window.apiClient.get('/config');
 
         // 初始化替换规则 UI

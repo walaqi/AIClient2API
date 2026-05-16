@@ -171,23 +171,25 @@ function onProviderChange(providerType) {
 function updateInputState() {
     const provider = getProviderSelect()?.value;
     const model = getModelSelect()?.value;
-    const ready = !!(provider && model && !isStreaming);
+    const hasSelection = !!(provider && model);
+    const ready = !!(hasSelection && !isStreaming);
 
     const input = getInput();
     const sendBtn = getSendBtn();
     const stopBtn = getStopBtn();
-    
-    if (input) input.disabled = isStreaming || !(provider && model);
-    
-    if (isStreaming) {
-        if (sendBtn) sendBtn.style.display = 'none';
-        if (stopBtn) stopBtn.style.display = 'flex';
-    } else {
-        if (sendBtn) {
-            sendBtn.style.display = 'flex';
-            sendBtn.disabled = !ready;
-        }
-        if (stopBtn) stopBtn.style.display = 'none';
+
+    if (input) {
+        input.disabled = !hasSelection || isStreaming;
+    }
+
+    if (sendBtn) {
+        sendBtn.style.display = isStreaming ? 'none' : 'flex';
+        sendBtn.disabled = !ready;
+    }
+
+    if (stopBtn) {
+        stopBtn.style.display = isStreaming ? 'flex' : 'none';
+        stopBtn.disabled = !isStreaming;
     }
 
     // Update status indicator
@@ -202,6 +204,19 @@ function updateInputState() {
             statusText.textContent = isStreaming ? t('playground.generating') : t('playground.status.unready');
         }
     }
+}
+
+function finalizeRequestUI({ shouldFocusInput = false } = {}) {
+    isStreaming = false;
+    currentAbortController = null;
+    updateInputState();
+
+    const input = getInput();
+    if (shouldFocusInput && input && !input.disabled) {
+        input.focus();
+    }
+
+    scrollToBottom();
 }
 
 // ── Chat logic ────────────────────────────────────────────────────────────────
@@ -359,10 +374,7 @@ async function imageResponse(provider, model, prompt, files, bubble, interfaceTy
             bubble.textContent = errorMsg;
             bubble.closest('.pg-message')?.classList.add('error');
         }
-        isStreaming = false;
-        currentAbortController = null;
-        updateInputState();
-        scrollToBottom();
+        finalizeRequestUI({ shouldFocusInput: true });
     }
 }
 
@@ -432,10 +444,7 @@ async function unaryResponse(provider, model, bubble, params) {
             const msgWrapper = bubble.closest('.pg-message');
             if (msgWrapper) msgWrapper.style.display = 'flex';
         }
-        isStreaming = false;
-        currentAbortController = null;
-        updateInputState();
-        scrollToBottom();
+        finalizeRequestUI({ shouldFocusInput: true });
     }
 }
 
@@ -569,10 +578,7 @@ async function streamResponse(provider, model, bubble, params) {
                 while (contentDiv.firstChild) bubble.appendChild(contentDiv.firstChild);
             }
         }
-        isStreaming = false;
-        currentAbortController = null;
-        updateInputState();
-        scrollToBottom();
+        finalizeRequestUI({ shouldFocusInput: true });
     }
 }
 

@@ -1,0 +1,37 @@
+[
+  {
+    "id": "api-potluck",
+    "name": "API 大锅饭",
+    "version": "1.0.2",
+    "minSystemVersion": "3.0.0",
+    "description": "多用户 Key 管理系统。支持每日配额限制、Token 用量统计、自定义过期时间及独立的用户查询界面。",
+    "downloadUrl": "https://raw.githubusercontent.com/justlovemaki/AIClient-2-API/main/plugins/api-potluck.zip"
+  },
+  {
+    "id": "model-usage-stats",
+    "name": "模型用量统计",
+    "version": "1.0.0",
+    "minSystemVersion": "2.8.0",
+    "description": "全自动统计 Provider 和 Model 维度的请求次数、Token 消耗，并提供直观的可视化仪表盘和趋势图。",
+    "downloadUrl": "https://raw.githubusercontent.com/justlovemaki/AIClient-2-API/main/plugins/model-usage-stats.zip"
+  },
+  {
+    "id": "ai-monitor",
+    "name": "AI 实时监控",
+    "version": "1.0.0",
+    "minSystemVersion": "3.0.0",
+    "description": "监控系统吞吐量（QPS/TPS）、延迟和错误率，帮助您实时掌握各个节点的运行状况。",
+    "downloadUrl": "https://raw.githubusercontent.com/justlovemaki/AIClient-2-API/main/plugins/ai-monitor.zip"
+  },
+  {
+    "id": "premium-export",
+    "name": "高级数据导出插件",
+    "version": "1.2.0",
+    "minSystemVersion": "3.0.0",
+    "isPaid": true,
+    "price": "￥19.9",
+    "description": "支持将所有用量统计、监控日志导出为 Excel、PDF 及自动同步至外部数据库。",
+    "paymentUrl": "https://example.com/pay/export-plugin",
+    "qrCode": "sponsor.png"
+  }
+]

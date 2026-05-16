@@ -15,7 +15,7 @@ import {getProviderModels} from '../provider-models.js';
 const baseModels = getProviderModels(MODEL_PROVIDER.CODEX_API);
 const fastModels = baseModels.map(m => `${m}-fast`);
 const CODEX_MODELS = [...new Set([...baseModels, ...fastModels])];
-const CODEX_VERSION = '0.124.0';
+const CODEX_VERSION = '0.130.0';
 export const IMAGE_MODELS = new Set(['gpt-image-2']);
 
 /**
@@ -931,15 +931,14 @@ export class CodexApiService {
     }
 
     /**
-     * 获取使用限制信息
-     * @returns {Promise<Object>} 使用限制信息（通用格式）
+     * 获取使用限制信息（返回 API 原始数据）
+     * @returns {Promise<Object>} 原始响应数据
      */
     async getUsageLimits() {
         if (!this.isInitialized) {
             await this.initialize();
         }
 
-        // 检查是否启用了 TLS Sidecar
         const isTLSSidecarEnabled = isTLSSidecarEnabledForProvider(this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.CODEX_API);
 
         try {
@@ -955,10 +954,9 @@ export class CodexApiService {
 
             const config = {
                 headers,
-                timeout: 30000 // 30 秒超时
+                timeout: 30000
             };
 
-            // 配置代理（如果未启用 TLS Sidecar）
             if (!isTLSSidecarEnabled) {
                 const proxyConfig = getProxyConfigForProvider(this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.CODEX_API);
                 if (proxyConfig) {
@@ -975,59 +973,15 @@ export class CodexApiService {
             this._applySidecar(axiosRequestConfig);
 
             const response = await axios.request(axiosRequestConfig);
-
-            // 解析响应数据并转换为通用格式
-            const data = response.data;
-
-            // 通用格式：{ lastUpdated, models: { "model-id": { remaining, resetTime, resetTimeRaw } } }
-            const result = {
-                lastUpdated: Date.now(),
-                models: {}
+            return {
+                ...response.data,
+                account: this.email
             };
-
-            // 从 rate_limit 提取配额信息
-            // Codex 使用百分比表示使用量，我们需要转换为剩余量
-            if (data.rate_limit) {
-                const primaryWindow = data.rate_limit.primary_window;
-                const secondaryWindow = data.rate_limit.secondary_window;
-
-                // 使用主窗口的数据作为主要配额信息
-                if (primaryWindow) {
-                    // remaining = 1 - (used_percent / 100)
-                    const remaining = 1 - (primaryWindow.used_percent || 0) / 100;
-                    const resetTime = primaryWindow.reset_at ? new Date(primaryWindow.reset_at * 1000).toISOString() : null;
-
-                    // 为所有 Codex 模型设置相同的配额信息
-                    const codexModels = ['default'];
-                    for (const modelId of codexModels) {
-                        result.models[modelId] = {
-                            remaining: Math.max(0, Math.min(1, remaining)), // 确保在 0-1 之间
-                            resetTime: resetTime,
-                            resetTimeRaw: primaryWindow.reset_at
-                        };
-                    }
-                }
-            }
-
-            // 保存原始响应数据供需要时使用
-            result.raw = {
-                planType: data.plan_type || 'unknown',
-                rateLimit: data.rate_limit,
-                codeReviewRateLimit: data.code_review_rate_limit,
-                credits: data.credits
-            };
-
-            logger.info(`[Codex] Successfully fetched usage limits for plan: ${result.raw.planType}`);
-            return result;
         } catch (error) {
             if (error.response?.status === 401) {
                 logger.info('[Codex] Received 401 during getUsageLimits. Triggering background refresh...');
-
-                // 触发后台异步刷新
                 this.triggerBackgroundRefresh();
                 error.credentialMarkedUnhealthy = true;
-
-                // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
                 error.skipErrorCount = true;
             }

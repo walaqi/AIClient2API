@@ -290,23 +290,34 @@ export class CodexConverter extends BaseConverter {
             codexRequest.instructions = data.instructions;
         }
 
-        if (data.input && Array.isArray(data.input) && codexRequest.input.length === 0) {
+        if (data.input && codexRequest.input.length === 0) {
              // 如果是 OpenAI Responses 格式的 input
-             for (const item of data.input) {
-                if (item.type === 'message' && item.role !== 'system' && item.role !== 'developer') {
-                    codexRequest.input.push({
-                        type: 'message',
-                        role: item.role === 'system' ? 'developer' : item.role,
-                        content: Array.isArray(item.content) ? item.content.map(c => ({
-                            type: item.role === 'assistant' ? 'output_text' : 'input_text',
-                            text: c.text
-                        })) : [{
-                            type: item.role === 'assistant' ? 'output_text' : 'input_text',
-                            text: item.content
-                        }]
-                    });
+             let input = data.input;
+             if (typeof input === 'string') {
+                 input = [{
+                     type: 'message',
+                     role: 'user',
+                     content: input
+                 }];
+             }
+
+             if (Array.isArray(input)) {
+                 for (const item of input) {
+                    if (item.type === 'message' && item.role !== 'system' && item.role !== 'developer') {
+                        codexRequest.input.push({
+                            type: 'message',
+                            role: item.role === 'system' ? 'developer' : item.role,
+                            content: Array.isArray(item.content) ? item.content.map(c => ({
+                                type: item.role === 'assistant' ? 'output_text' : 'input_text',
+                                text: c.text
+                            })) : [{
+                                type: item.role === 'assistant' ? 'output_text' : 'input_text',
+                                text: item.content
+                            }]
+                        });
+                    }
                 }
-            }
+             }
         }
 
         if (data.tools && data.tools.length > 0) {

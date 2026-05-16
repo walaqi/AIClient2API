@@ -353,29 +353,24 @@ export class GrokApiService {
         }
     }
 
+    /**
+     * 获取使用限制信息（返回 API 原始数据）
+     */
     async getUsageLimits() {
         try {
             const response = await this._request({
                 url: `${this.baseUrl}/rest/rate-limits`,
-                data: { "requestKind": "DEFAULT", "modelName": "grok-3" },
+                data: { "requestKind": "DEFAULT", "modelName": "fast" },
                 timeout: 30000
             });
-            const data = response.data;
-            let remaining = data.remainingTokens !== undefined ? data.remainingTokens : (data.remainingQueries !== undefined ? data.remainingQueries : data.totalQueries);
-            if (data.totalQueries > 0) {
-                data.totalLimit = data.totalQueries;
-                data.usedQueries = Math.max(0, data.totalQueries - (data.remainingQueries || 0));
-                data.unit = 'queries';
-            } else {
-                data.totalLimit = data.totalTokens || 0;
-                data.usedQueries = Math.max(0, (data.totalTokens || 0) - (data.remainingTokens || 0));
-                data.unit = 'tokens';
-            }
+            
             this.lastSyncAt = Date.now();
-            this.config.usageData = data;
             this.config.lastHealthCheckTime = new Date().toISOString();
-            return { lastUpdated: this.lastSyncAt, remaining, ...data };
-        } catch (error) { throw error; }
+            
+            return response.data;
+        } catch (error) {
+            throw error;
+        }
     }
 
     isExpiryDateNear() {

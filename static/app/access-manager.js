@@ -336,11 +336,11 @@ function buildCherryStudioSnippet(providerName, baseUrl, apiKey, model, format) 
     }
 
     return buildMarkdownSnippet('Cherry Studio', [
-        ['API 提供商', 'OpenAI 兼容协议'],
-        ['显示名称', `AIClient2API (${providerName})`],
-        ['Base URL (基础地址)', baseUrl],
-        ['API Key (密钥)', resolvedApiKey],
-        ['模型 (Model)', model]
+        ['access.snippets.field.provider', 'access.snippets.field.protocol'],
+        ['access.snippets.field.name', `AIClient2API (${providerName})`],
+        ['access.snippets.field.baseUrl', baseUrl],
+        ['access.snippets.field.apiKey', resolvedApiKey],
+        ['access.snippets.field.model', model]
     ]);
 }
 
@@ -367,10 +367,10 @@ function buildNextChatSnippet(baseUrl, apiKey, model, format) {
     }
 
     return buildMarkdownSnippet('NextChat', [
-        ['API Key (密钥)', resolvedApiKey],
-        ['Base URL (基础地址)', baseUrl],
-        ['自定义模型 (Custom Models)', model],
-        ['默认模型 (Default Model)', model]
+        ['access.snippets.field.apiKey', resolvedApiKey],
+        ['access.snippets.field.baseUrl', baseUrl],
+        ['access.snippets.field.customModels', model],
+        ['access.snippets.field.defaultModel', model]
     ]);
 }
 
@@ -399,11 +399,11 @@ function buildClineSnippet(providerName, baseUrl, apiKey, model, format) {
     }
 
     return buildMarkdownSnippet('Cline', [
-        ['API 提供商', 'OpenAI 兼容协议'],
-        ['配置名称 (Profile Name)', `AIClient2API (${providerName})`],
-        ['Base URL (基础地址)', baseUrl],
-        ['API Key (密钥)', resolvedApiKey],
-        ['模型 ID', model]
+        ['access.snippets.field.provider', 'access.snippets.field.protocol'],
+        ['access.snippets.field.profileName', `AIClient2API (${providerName})`],
+        ['access.snippets.field.baseUrl', baseUrl],
+        ['access.snippets.field.apiKey', resolvedApiKey],
+        ['access.snippets.field.modelId', model]
     ]);
 }
 

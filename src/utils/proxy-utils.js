@@ -10,6 +10,28 @@ import { SocksProxyAgent } from 'socks-proxy-agent';
 import { getTLSSidecar } from './tls-sidecar.js';
 
 /**
+ * 从插件中解析当前节点的代理 URL。
+ * 检查 config 中是否由插件注入了 ipNodeProxy.getProxyUrl 方法。
+ *
+ * @param {Object} config - 已合并节点配置的请求配置
+ * @param {string} providerType - 提供商类型
+ * @returns {string|null} 绑定的代理 URL
+ */
+export function getNodeProxyUrlFromBinding(config, providerType) {
+    if (typeof config?.ipNodeProxy?.getProxyUrl === 'function') {
+        try {
+            return config.ipNodeProxy.getProxyUrl(providerType, config.uuid);
+        } catch (error) {
+            const nodeName = config?.customName || config?.uuid || 'unknown';
+            logger.error(`[Proxy] Error calling ipNodeProxy.getProxyUrl for ${providerType}/${nodeName}:`, error.message);
+        }
+    }
+
+    return null;
+}
+
+
+/**
  * 解析代理URL并返回相应的代理配置
  * @param {string} proxyUrl - 代理URL，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080
  * @returns {Object|null} 代理配置对象，包含 httpAgent 和 httpsAgent
@@ -67,8 +89,9 @@ function hasAccountProxyUrl(value) {
  *
  * 优先级（从高到低）：
  * 1. config.ACCOUNT_PROXY_DISABLED === true → 强制直连，返回 false
- * 2. config.ACCOUNT_PROXY_URL 非空字符串 → 账号级代理生效，返回 true（绕过白名单）
- * 3. 全局 PROXY_URL + PROXY_ENABLED_PROVIDERS 白名单匹配
+ * 2. 插件注入的 ipNodeProxy.getProxyUrl 返回非空 → 节点级代理生效，返回 true（绕过白名单）
+ * 3. config.ACCOUNT_PROXY_URL 非空字符串 → 账号级代理生效，返回 true（绕过白名单）
+ * 4. 全局 PROXY_URL + PROXY_ENABLED_PROVIDERS 白名单匹配
  *
  * @param {Object} config - 配置对象（可能已合并账号级字段）
  * @param {string} providerType - 提供商类型
@@ -82,6 +105,11 @@ export function isProxyEnabledForProvider(config, providerType) {
     // 账号级：显式禁用（最高优先级）
     if (config.ACCOUNT_PROXY_DISABLED === true) {
         return false;
+    }
+
+    // 节点级：插件注入的 IP 节点绑定代理（绕过白名单）
+    if (getNodeProxyUrlFromBinding(config, providerType)) {
+        return true;
     }
 
     // 账号级：账号自带代理 URL → 绕过白名单
@@ -123,14 +151,19 @@ export function getProxyConfigForProvider(config, providerType) {
         return null;
     }
 
-    const useAccountProxy = hasAccountProxyUrl(config.ACCOUNT_PROXY_URL);
-    const chosenUrl = useAccountProxy ? config.ACCOUNT_PROXY_URL.trim() : config.PROXY_URL;
-    const source = useAccountProxy ? 'account' : 'global';
+    // URL 选择优先级：node binding > account > global
+    const boundProxyUrl = getNodeProxyUrlFromBinding(config, providerType);
+    const useAccountProxy = !boundProxyUrl && hasAccountProxyUrl(config.ACCOUNT_PROXY_URL);
+    const chosenUrl = boundProxyUrl
+        ? boundProxyUrl
+        : (useAccountProxy ? config.ACCOUNT_PROXY_URL.trim() : config.PROXY_URL);
+    const source = boundProxyUrl ? 'node-binding' : (useAccountProxy ? 'account' : 'global');
 
     const proxyConfig = parseProxyUrl(chosenUrl);
     if (proxyConfig) {
         logger.info(`[Proxy] Using ${proxyConfig.proxyType} proxy (${source}) for ${providerType}: ${chosenUrl}`);
     }
+
     return proxyConfig;
 }
 
@@ -191,9 +224,12 @@ export function isTLSSidecarEnabledForProvider(config, providerType) {
 export function configureTLSSidecar(axiosConfig, config, providerType, defaultBaseUrl = null) {
     const sidecar = getTLSSidecar();
     if (sidecar.isReady() && isTLSSidecarEnabledForProvider(config, providerType)) {
-        // 代理优先级：ACCOUNT_PROXY_URL > TLS_SIDECAR_PROXY_URL > null
+        // 代理优先级：node binding > ACCOUNT_PROXY_URL > TLS_SIDECAR_PROXY_URL > null
         let proxyUrl = null;
-        if (!config.ACCOUNT_PROXY_DISABLED) {
+        const boundProxyUrl = getNodeProxyUrlFromBinding(config, providerType);
+        if (boundProxyUrl) {
+            proxyUrl = boundProxyUrl;
+        } else if (!config.ACCOUNT_PROXY_DISABLED) {
             proxyUrl = config.ACCOUNT_PROXY_URL?.trim() || config.TLS_SIDECAR_PROXY_URL || null;
         }
 

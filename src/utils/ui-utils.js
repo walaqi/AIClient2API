@@ -9,8 +9,12 @@ import { UI_PATHS } from './constants.js';
  * @returns {boolean}
  */
 export function isUIPath(path) {
+    // 检查常见静态文件扩展名
+    const isStaticExtension = /\.(png|jpg|jpeg|gif|svg|ico)$/i.test(path);
+    
     return UI_PATHS.STATIC_PREFIXES.some(prefix => path.startsWith(prefix)) || 
-           UI_PATHS.STATIC_EXACT.includes(path);
+           UI_PATHS.STATIC_EXACT.includes(path) ||
+           isStaticExtension;
 }
 
 /**

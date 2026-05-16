@@ -111,15 +111,17 @@ let isAppInitialized = false;
 /**
  * 加载初始数据
  */
-function loadInitialData() {
-    loadSystemInfo();
-    loadProviders();
+async function loadInitialData() {
+    await Promise.all([
+        loadSystemInfo(),
+        loadProviders()
+    ]);
 }
 
 /**
  * 初始化应用
  */
-function initApp() {
+async function initApp() {
     if (isAppInitialized) {
         return;
     }
@@ -148,11 +150,37 @@ function initApp() {
         playground: loadPlaygroundData
     });
     
+    // 导出全局函数供其他模块使用
+    window.loadProviders = loadProviders;
+    window.openProviderManager = openProviderManager;
+    window.showProviderManagerModal = showProviderManagerModal;
+    window.refreshProviderConfig = refreshProviderConfig;
+    window.fileUploadHandler = fileUploadHandler;
+    window.showAuthModal = showAuthModal;
+    window.executeGenerateAuthUrl = executeGenerateAuthUrl;
+    window.handleGenerateAuthUrl = handleGenerateAuthUrl;
+    window.showAddProviderGroupModal = showAddProviderGroupModal;
+
+    // 配置管理相关全局函数
+    window.viewConfig = viewConfig;
+    window.deleteConfig = deleteConfig;
+    window.loadConfigList = loadConfigList;
+    window.closeConfigModal = closeConfigModal;
+    window.copyConfigContent = copyConfigContent;
+    window.reloadConfig = reloadConfig;
+    window.generateApiKey = generateApiKey;
+    window.loadAccessInfo = loadAccessInfo;
+
+    // 用量管理相关全局函数
+    window.refreshUsage = refreshUsage;
+
+    // 插件管理相关全局函数
+    window.togglePlugin = togglePlugin;
+
     // 初始化自定义模型管理
     window.customModelsManager = new CustomModelsManager();
 
     // 初始化各个模块
-    initNavigation();
     initEventListeners();
     initEventStream();
     initFileUpload(); // 初始化文件上传功能
@@ -164,7 +192,12 @@ function initApp() {
     initTutorialManager(); // 初始化教程管理功能
     initPlaygroundManager(); // 初始化 Playground
     initMobileMenu(); // 初始化移动端菜单
-    loadInitialData();
+    
+    // 加载初始数据 (确保在导航初始化前加载，因为导航可能触发页面数据加载)
+    await loadInitialData();
+    
+    // 初始化导航功能，触发初始页面的激活
+    initNavigation();
     
     // 显示欢迎消息
     showToast(t('common.success'), t('common.welcome'), 'success');
@@ -263,33 +296,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // 否则等待 componentsLoaded 事件
     }
 });
-
-// 导出全局函数供其他模块使用
-window.loadProviders = loadProviders;
-window.openProviderManager = openProviderManager;
-window.showProviderManagerModal = showProviderManagerModal;
-window.refreshProviderConfig = refreshProviderConfig;
-window.fileUploadHandler = fileUploadHandler;
-window.showAuthModal = showAuthModal;
-window.executeGenerateAuthUrl = executeGenerateAuthUrl;
-window.handleGenerateAuthUrl = handleGenerateAuthUrl;
-window.showAddProviderGroupModal = showAddProviderGroupModal;
-
-// 配置管理相关全局函数
-window.viewConfig = viewConfig;
-window.deleteConfig = deleteConfig;
-window.loadConfigList = loadConfigList;
-window.closeConfigModal = closeConfigModal;
-window.copyConfigContent = copyConfigContent;
-window.reloadConfig = reloadConfig;
-window.generateApiKey = generateApiKey;
-window.loadAccessInfo = loadAccessInfo;
-
-// 用量管理相关全局函数
-window.refreshUsage = refreshUsage;
-
-// 插件管理相关全局函数
-window.togglePlugin = togglePlugin;
 
 // 导出调试函数
 window.getProviderStats = () => getProviderStats(providerStats);

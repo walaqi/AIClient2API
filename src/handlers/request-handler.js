@@ -64,6 +64,11 @@ export function createRequestHandler(config, providerPoolManager) {
             
             const requestUrl = new URL(req.url, `http://${req.headers.host}`);
             let path = requestUrl.pathname;
+            // 规范化路径：移除末尾斜杠（除非是根路径）
+            if (path.length > 1 && path.endsWith('/')) {
+                path = path.slice(0, -1);
+                requestUrl.pathname = path;
+            }
             const method = req.method;
 
             try {

@@ -18,7 +18,7 @@ import path from 'path';
 const PLUGINS_CONFIG_FILE = path.join(process.cwd(), 'configs', 'plugins.json');
 
 // 默认禁用的插件列表
-const DEFAULT_DISABLED_PLUGINS = ['api-potluck', 'ai-monitor', 'model-usage-stats'];
+const DEFAULT_DISABLED_PLUGINS = ['api-potluck', 'ai-monitor', 'model-usage-stats', 'ip-node-proxy'];
 
 /**
  * 插件类型常量
@@ -61,6 +61,8 @@ class PluginManager {
         this.pluginsConfig = { plugins: {} };
         /** @type {boolean} */
         this.initialized = false;
+        /** @type {Object} */
+        this.config = null; // 存储服务器全局配置
     }
 
     /**
@@ -190,6 +192,7 @@ class PluginManager {
      * @param {Object} config - 服务器配置
      */
     async initAll(config) {
+        this.config = config;
         await this.loadConfig();
         
         for (const [name, plugin] of this.plugins) {
@@ -541,6 +544,48 @@ class PluginManager {
         const plugin = this.plugins.get(name);
         if (plugin) {
             plugin._enabled = enabled;
+        }
+    }
+
+    /**
+     * 加载并初始化单个插件（用于热插拔）
+     * @param {string} name - 插件目录名
+     */
+    async loadAndInitPlugin(name) {
+        const pluginsDir = path.join(process.cwd(), 'src', 'plugins');
+        const pluginPath = path.join(pluginsDir, name, 'index.js');
+        
+        if (!existsSync(pluginPath)) {
+            throw new Error(`Plugin entry not found: ${pluginPath}`);
+        }
+
+        try {
+            // 动态导入，使用时间戳避免 ESM 缓存
+            const pluginModule = await import(`file://${pluginPath}?t=${Date.now()}`);
+            const plugin = pluginModule.default || pluginModule;
+            
+            if (plugin && plugin.name) {
+                this.register(plugin);
+                
+                // 重新加载配置以确保包含新插件
+                await this.loadConfig();
+                
+                const pluginConfig = this.pluginsConfig.plugins[plugin.name] || {};
+                const enabled = pluginConfig.enabled !== false;
+                
+                if (enabled) {
+                    if (typeof plugin.init === 'function') {
+                        await plugin.init(this.config);
+                    }
+                    plugin._enabled = true;
+                    logger.info(`[PluginManager] Plugin ${plugin.name} loaded and initialized dynamically`);
+                }
+                
+                return plugin;
+            }
+        } catch (error) {
+            logger.error(`[PluginManager] Failed to load and init plugin ${name}:`, error.message);
+            throw error;
         }
     }
 }

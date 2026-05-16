@@ -152,8 +152,17 @@ export class OpenAIResponsesConverter extends BaseConverter {
         }
 
         // input 包含用户消息和历史对话
-        if (responsesRequest.input && Array.isArray(responsesRequest.input)) {
-            responsesRequest.input.forEach(item => {
+        let input = responsesRequest.input;
+        if (typeof input === 'string') {
+            input = [{
+                type: 'message',
+                role: 'user',
+                content: input
+            }];
+        }
+
+        if (input && Array.isArray(input)) {
+            input.forEach(item => {
                 const itemType = item.type || (item.role ? 'message' : '');
                 
                 switch (itemType) {
@@ -408,8 +417,17 @@ export class OpenAIResponsesConverter extends BaseConverter {
         }
 
         // 处理 input 数组中的消息
-        if (responsesRequest.input && Array.isArray(responsesRequest.input)) {
-            responsesRequest.input.forEach(item => {
+        let input = responsesRequest.input;
+        if (typeof input === 'string') {
+            input = [{
+                type: 'message',
+                role: 'user',
+                content: input
+            }];
+        }
+
+        if (input && Array.isArray(input)) {
+            input.forEach(item => {
                 const itemType = item.type || (item.role ? 'message' : '');
                 
                 switch (itemType) {
@@ -628,8 +646,17 @@ export class OpenAIResponsesConverter extends BaseConverter {
         }
 
         // 处理 input 数组中的消息
-        if (responsesRequest.input && Array.isArray(responsesRequest.input)) {
-            responsesRequest.input.forEach(item => {
+        let input = responsesRequest.input;
+        if (typeof input === 'string') {
+            input = [{
+                type: 'message',
+                role: 'user',
+                content: input
+            }];
+        }
+
+        if (input && Array.isArray(input)) {
+            input.forEach(item => {
                 const itemType = item.type || (item.role ? 'message' : '');
                 
                 switch (itemType) {

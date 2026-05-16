@@ -2,6 +2,23 @@ import { getPluginManager } from '../core/plugin-manager.js';
 import logger from '../utils/logger.js';
 import { getRequestBody } from '../utils/common.js';
 import { broadcastEvent } from './event-broadcast.js';
+import { fetchMarketPlugins, installPlugin, installPluginFromBuffer } from '../services/plugin-installer.js';
+import multer from 'multer';
+import path from 'path';
+
+// 配置插件上传
+const storage = multer.memoryStorage();
+const pluginUpload = multer({
+    storage,
+    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB 限制
+    fileFilter: (req, file, cb) => {
+        if (path.extname(file.originalname).toLowerCase() === '.zip') {
+            cb(null, true);
+        } else {
+            cb(new Error('只支持上传 .zip 格式的插件包'), false);
+        }
+    }
+});
 
 /**
  * 获取插件列表
@@ -19,6 +36,111 @@ export async function handleGetPlugins(req, res) {
         res.end(JSON.stringify({
             error: {
                 message: 'Failed to get plugins list: ' + error.message
+            }
+        }));
+        return true;
+    }
+}
+
+/**
+ * 上传并安装插件
+ */
+export async function handleUploadPlugin(req, res) {
+    return new Promise((resolve) => {
+        pluginUpload.single('file')(req, res, async (err) => {
+            if (err) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: { message: err.message } }));
+                return resolve(true);
+            }
+
+            try {
+                if (!req.file) {
+                    res.writeHead(400, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: { message: '未选择文件' } }));
+                    return resolve(true);
+                }
+
+                const pluginId = req.body.pluginId || path.parse(req.file.originalname).name;
+                await installPluginFromBuffer(pluginId, req.file.buffer);
+
+                // 广播事件
+                broadcastEvent('plugin_update', {
+                    action: 'install',
+                    pluginId,
+                    timestamp: new Date().toISOString()
+                });
+
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ success: true, message: '插件上传并安装成功' }));
+                resolve(true);
+            } catch (error) {
+                logger.error('[UI API] Failed to upload plugin:', error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: { message: '安装失败：' + error.message } }));
+                resolve(true);
+            }
+        });
+    });
+}
+
+
+/**
+ * 获取插件市场列表
+ */
+export async function handleGetMarketPlugins(req, res) {
+    try {
+        const urlObj = new URL(req.url, `http://${req.headers.host}`);
+        const updateUrl = urlObj.searchParams.get('url');
+        
+        const marketPlugins = await fetchMarketPlugins(updateUrl);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ plugins: marketPlugins }));
+        return true;
+    } catch (error) {
+        logger.error('[UI API] Failed to fetch market plugins:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            error: {
+                message: error.message
+            }
+        }));
+        return true;
+    }
+}
+
+/**
+ * 安装插件
+ */
+export async function handleInstallPlugin(req, res) {
+    try {
+        const body = await getRequestBody(req);
+        const { plugin } = body;
+
+        if (!plugin || !plugin.id || !plugin.downloadUrl) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: '无效的插件信息' } }));
+            return true;
+        }
+
+        await installPlugin(plugin);
+
+        // 广播安装成功事件
+        broadcastEvent('plugin_update', {
+            action: 'install',
+            pluginId: plugin.id,
+            timestamp: new Date().toISOString()
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, message: `插件 ${plugin.id} 安装成功` }));
+        return true;
+    } catch (error) {
+        logger.error('[UI API] Failed to install plugin:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+            error: {
+                message: '安装失败：' + error.message
             }
         }));
         return true;
