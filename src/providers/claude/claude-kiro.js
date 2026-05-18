@@ -36,14 +36,15 @@ const KIRO_THINKING = {
 const KIRO_CONSTANTS = {
     REFRESH_URL: 'https://prod.{{region}}.auth.desktop.kiro.dev/refreshToken',
     REFRESH_IDC_URL: 'https://oidc.{{region}}.amazonaws.com/token',
-    BASE_URL: 'https://runtime.{{region}}.kiro.dev/generateAssistantResponse',
+    // BASE_URL: 'https://runtime.{{region}}.kiro.dev/generateAssistantResponse',
+    BASE_URL: 'https://q.{{region}}.amazonaws.com/generateAssistantResponse',
     DEFAULT_MODEL_NAME: 'claude-sonnet-4-5',
     AXIOS_TIMEOUT: 120000, // 2 minutes timeout for normal (non-stream) requests
     STREAM_TOTAL_TIMEOUT: 300000, // 5 minutes total timeout for stream requests (overridable via CONFIG.KIRO_STREAM_TIMEOUT_MS)
     STREAM_INACTIVITY_TIMEOUT: 120000, // 60s socket inactivity (after first byte) (overridable via CONFIG.KIRO_STREAM_INACTIVITY_MS)
     TOKEN_REFRESH_TIMEOUT: 15000, // 15 seconds timeout for token refresh (shorter to avoid blocking)
     USER_AGENT: 'KiroIDE',
-    KIRO_VERSION: '0.12.184',
+    KIRO_VERSION: '0.11.63',
     CONTENT_TYPE_JSON: 'application/json',
     ACCEPT_JSON: 'application/json',
     AUTH_METHOD_SOCIAL: 'social',
@@ -2337,7 +2338,7 @@ async saveCredentialsToFile(filePath, newData) {
             if (truncated) {
                 logger.warn(`[Kiro Stream] Detected truncation: bufferRemain=${buffer.length}, socketAborted=${socketAborted}`);
             }
-            yield { type: '__kiroStreamEnd', truncated };
+            yield { type: '__kiroStreamEnd', truncated, bufferRemain: buffer.length, socketAborted };
         } catch (error) {
             // 确保出错时关闭流
             if (stream && typeof stream.destroy === 'function') {
@@ -2571,12 +2572,14 @@ async saveCredentialsToFile(filePath, newData) {
         }
 
         try {
+            const streamStartMs = Date.now();
             let totalContent = '';
             let outputTokens = 0;
             const toolCalls = [];
             let currentToolCall = null; // 用于累积结构化工具调用
             const toolUseBlockIndexes = new Map(); // toolUseId -> content block index
             let wasTruncated = false;  // 上游流是否被截断的多源 OR 信号
+            let streamEndInfo = { bufferRemain: 0, socketAborted: false };
 
             const estimatedInputTokens = this.estimateInputTokens(requestBody);
 
@@ -2603,6 +2606,7 @@ async saveCredentialsToFile(filePath, newData) {
                 if (event.type === '__kiroStreamEnd') {
                     // 内部控制事件: 收集 truncated 信号, 不向下游 emit
                     wasTruncated = wasTruncated || !!event.truncated;
+                    streamEndInfo = { bufferRemain: event.bufferRemain || 0, socketAborted: !!event.socketAborted };
                     continue;
                 }
                 if (event.type === 'contextUsage' && event.contextUsagePercentage) {
@@ -2881,6 +2885,8 @@ async saveCredentialsToFile(filePath, newData) {
                         }
                         currentToolCall = null;
                     }
+                } else {
+                    logger.debug('[Kiro Stream] Unknown event type:', event.type, JSON.stringify(event).substring(0, 200));
                 }
             }
             
@@ -3012,6 +3018,7 @@ async saveCredentialsToFile(filePath, newData) {
             if (emittedOnlyThinking) {
                 logger.warn(`[Kiro Stream] Thinking-only response; reporting stop_reason=end_turn`);
             }
+            logger.info(`[Kiro Stream] STREAM_SUMMARY model=${finalModel} stopReason=${stopReason} truncated=${wasTruncated} bufferRemain=${streamEndInfo.bufferRemain} socketAborted=${streamEndInfo.socketAborted} toolCalls=${toolCalls.length} outTok=${outputTokens} visibleText=${streamState.hasVisibleText} thinkingOnly=${emittedOnlyThinking} durMs=${Date.now() - streamStartMs}`);
             yield {
                 type: "message_delta",
                 delta: { stop_reason: stopReason },
