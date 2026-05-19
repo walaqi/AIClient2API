@@ -110,8 +110,7 @@ export async function handleGetConfig(req, res, currentConfig) {
         LOG_MAX_FILE_SIZE: currentConfig.LOG_MAX_FILE_SIZE,
         LOG_MAX_FILES: currentConfig.LOG_MAX_FILES,
         SCHEDULED_HEALTH_CHECK: currentConfig.SCHEDULED_HEALTH_CHECK,
-        // 脱敏：只返回是否设置了 API Key，不返回原文
-        REQUIRED_API_KEY: currentConfig.REQUIRED_API_KEY ? '******' : '',
+        REQUIRED_API_KEY: currentConfig.REQUIRED_API_KEY || '',
         systemPrompt,
     };
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -138,13 +137,8 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
         const newConfig = body;
 
         // Update config values in memory（含类型校验）
-        if (newConfig.REQUIRED_API_KEY !== undefined) {
-            if (typeof newConfig.REQUIRED_API_KEY === 'string') {
-                // 如果是脱敏后的字符串，则忽略更新，保留原值
-                if (newConfig.REQUIRED_API_KEY !== '******') {
-                    currentConfig.REQUIRED_API_KEY = newConfig.REQUIRED_API_KEY;
-                }
-            }
+        if (newConfig.REQUIRED_API_KEY !== undefined && typeof newConfig.REQUIRED_API_KEY === 'string') {
+            currentConfig.REQUIRED_API_KEY = newConfig.REQUIRED_API_KEY;
         }
         if (newConfig.HOST !== undefined) {
             if (typeof newConfig.HOST === 'string' && newConfig.HOST.length > 0) currentConfig.HOST = newConfig.HOST;
