@@ -2753,8 +2753,11 @@ async saveCredentialsToFile(filePath, newData) {
 
                     // 工具调用事件（包含 name 和 toolUseId）
                     if (tc.name && tc.toolUseId) {
+                        /*
+                        * 这里注释掉, 因为会导致后续的文本块被忽略. 按照claude code的协议, content-stop 后面可以有tool-use, 然后还有content.
+                        */
                         // 遇到工具调用时，立即关闭文本块，避免前端等待到流结束才看到 content_block_stop
-                        toolEvents.push(...stopBlock(streamState.textBlockIndex));
+                        // toolEvents.push(...stopBlock(streamState.textBlockIndex));
 
                         // 同一工具调用续传
                         if (currentToolCall && currentToolCall.toolUseId === tc.toolUseId) {
