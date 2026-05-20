@@ -69,5 +69,12 @@
     "LOG_MAX_FILES": 10,
     "TLS_SIDECAR_ENABLED": false,
     "TLS_SIDECAR_PORT": 9090,
-    "UI_ENABLED": true
+    "UI_ENABLED": true,
+
+    "_OUTPUT_RESERVE_NOTES_": "Kiro 输出截断缓解 (参考 cursor2api v2.7.8)。全部默认关闭；仅作用于 claude-kiro-oauth provider。详见 docs/pending-plans/compress the inputs/。",
+    "OUTPUT_RESERVE_CONTEXT_PRESSURE": 1.0,
+    "OUTPUT_RESERVE_CONTEXT_PRESSURE_SCOPE": "delta_only",
+    "OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE": false,
+    "OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS": 8192,
+    "OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE": false
 }
