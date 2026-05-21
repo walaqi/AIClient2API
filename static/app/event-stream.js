@@ -72,10 +72,14 @@ function addLogEntry(logData) {
     const timeStr = date.toLocaleTimeString();
     const levelClass = `log-level-${logData.level}`;
 
+    const message = logData.message.length > 500
+        ? logData.message.slice(0, 500) + '...'
+        : logData.message;
+
     logEntry.innerHTML = `
         <span class="log-time">[${timeStr}]</span>
         <span class="${levelClass}">[${logData.level.toUpperCase()}]</span>
-        <span class="log-message">${escapeHtml(logData.message)}</span>
+        <span class="log-message">${escapeHtml(message)}</span>
     `;
 
     elements.logsContainer.appendChild(logEntry);

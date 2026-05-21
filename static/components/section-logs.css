@@ -20,6 +20,9 @@
 .log-entry {
     margin-bottom: 0.5rem;
     padding: 0.25rem 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .log-time {
