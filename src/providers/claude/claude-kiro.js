@@ -402,6 +402,46 @@ function isIncompleteFileToolCall(toolName, parsedInput) {
     return parsedInput.file_path && !parsedInput.content;
 }
 
+function getOutputReserveConfig(config) {
+    let pressureFactor = Number.parseFloat(config?.OUTPUT_RESERVE_CONTEXT_PRESSURE);
+    if (!Number.isFinite(pressureFactor) || pressureFactor < 1.0) pressureFactor = 1.0;
+    else if (pressureFactor > 2.0) { pressureFactor = 2.0; }
+    const truncateOn = config?.OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE === true;
+    let truncateMax = Number.parseInt(config?.OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS, 10);
+    if (!Number.isFinite(truncateMax) || truncateMax < 1024) truncateMax = 8192;
+    const adaptiveDesc = config?.OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE === true;
+    return { pressureFactor, truncateOn, truncateMax, adaptiveDesc };
+}
+
+const TOOL_RESULT_RATIOS = { Read: 0.5, Bash: 0.25, Grep: 0.8, Glob: 0.8 };
+
+function truncateHeadTailByTool(text, maxLen, toolName) {
+    if (!text || text.length <= maxLen) return { text, truncated: false };
+    if (text.startsWith('data:image/') || text.startsWith('data:application/')) {
+        return { text, truncated: false };
+    }
+    const headRatio = TOOL_RESULT_RATIOS[toolName] ?? 0.6;
+    const placeholder = `\n\n...[omitted]...\n\n`;
+    const budget = Math.max(0, maxLen - placeholder.length);
+    const headLen = Math.floor(budget * headRatio);
+    const tailLen = budget - headLen;
+    return { text: text.slice(0, headLen) + placeholder + text.slice(-tailLen), truncated: true };
+}
+
+const ADAPTIVE_DESC_TABLE = [[5, 8192], [40, 4096], [90, 2048], [160, 1024]];
+
+function pickAdaptiveDescBudget(n) {
+    if (n <= ADAPTIVE_DESC_TABLE[0][0]) return ADAPTIVE_DESC_TABLE[0][1];
+    const last = ADAPTIVE_DESC_TABLE[ADAPTIVE_DESC_TABLE.length - 1];
+    if (n >= last[0]) return last[1];
+    for (let i = 0; i < ADAPTIVE_DESC_TABLE.length - 1; i++) {
+        const [n1, b1] = ADAPTIVE_DESC_TABLE[i];
+        const [n2, b2] = ADAPTIVE_DESC_TABLE[i + 1];
+        if (n >= n1 && n < n2) return Math.round(b1 + (n - n1) / (n2 - n1) * (b2 - b1));
+    }
+    return 8192;
+}
+
 /**
  * 从损坏的 JSON 中提取关键凭证字段
  * 当标准 JSON 解析和 repairJson 都失败时使用
@@ -1109,6 +1149,22 @@ async saveCredentialsToFile(filePath, newData) {
             }
         }
 
+        // 措施 2/3: 获取输出预留配置
+        const reserve = getOutputReserveConfig(this.config);
+
+        // 措施 2: 构建 tool_use_id → 工具名映射（用于 tool_result 智能截断）
+        const toolUseIdToName = new Map();
+        if (reserve.truncateOn) {
+            for (const m of processedMessages) {
+                if (m.role !== 'assistant' || !Array.isArray(m.content)) continue;
+                for (const part of m.content) {
+                    if (part?.type === 'tool_use' && part.id && part.name) {
+                        toolUseIdToName.set(part.id, part.name);
+                    }
+                }
+            }
+        }
+
         // 合并相邻相同 role 的消息
         const mergedMessages = [];
         for (let i = 0; i < processedMessages.length; i++) {
@@ -1182,9 +1238,12 @@ async saveCredentialsToFile(filePath, newData) {
                 /*
                 * 4K 阈值更激进——Bash / TodoWrite / Agent / EnterPlanMode 都会被截。配合头尾保留策略能减少损失，但 Bash 的 git 安全规则在中部会被丢，建议留意。
                 */
-                const MAX_DESCRIPTION_LENGTH = 1024*8;
-                // const MAX_DESCRIPTION_LENGTH = 1024*4;
-                // const MAX_DESCRIPTION_LENGTH = 1024*20;
+                const MAX_DESCRIPTION_LENGTH = reserve.adaptiveDesc
+                    ? pickAdaptiveDescBudget(filteredTools.filter(t => t.description?.trim()).length)
+                    : 1024*8;
+                if (reserve.adaptiveDesc) {
+                    logger.info(`[Kiro] Adaptive tool desc: ${filteredTools.length} tools -> ${MAX_DESCRIPTION_LENGTH} chars/tool`);
+                }
 
                 // 截断白名单：这些工具的 description 中部含有关键安全/正确性约束（如 Bash 的 git 安全协议、
                 // NEVER skip hooks / NEVER force push 等），头尾保留策略会丢中部，因此对它们绕过截断。
@@ -1215,7 +1274,7 @@ async saveCredentialsToFile(filePath, newData) {
                         } else if (desc.length > MAX_DESCRIPTION_LENGTH) {
                             // 头 + 尾保留：工具描述的关键约束通常分布在开头（用途/总则）和结尾（边界规则），
                             // 中部多为示例。该策略丢中部保两端，比简单 substring 截尾损失小。
-                            const placeholder = '\n\n…(中间示例已省略，保留首尾规则)…\n\n';
+                            const placeholder = '\n\n...[omitted]...\n\n';
                             const budget = MAX_DESCRIPTION_LENGTH - placeholder.length;
                             const headLen = Math.floor(budget * 0.65);
                             const tailLen = budget - headLen;
@@ -1344,8 +1403,17 @@ async saveCredentialsToFile(filePath, newData) {
                         if (part.type === 'text') {
                             userInputMessage.content += part.text;
                         } else if (part.type === 'tool_result') {
+                            let trText = this.getContentText(part.content);
+                            if (reserve.truncateOn && trText.length > reserve.truncateMax) {
+                                const toolName = toolUseIdToName.get(part.tool_use_id) || '';
+                                const r = truncateHeadTailByTool(trText, reserve.truncateMax, toolName);
+                                if (r.truncated) {
+                                    logger.info(`[Kiro] Truncated tool_result (tool=${toolName}, ${trText.length} -> ${r.text.length})`);
+                                    trText = r.text;
+                                }
+                            }
                             toolResults.push({
-                                content: [{ text: this.getContentText(part.content) }],
+                                content: [{ text: trText }],
                                 status: 'success',
                                 toolUseId: part.tool_use_id
                             });
@@ -1506,8 +1574,17 @@ async saveCredentialsToFile(filePath, newData) {
                     if (part.type === 'text') {
                         currentContent += part.text;
                     } else if (part.type === 'tool_result') {
+                        let trText = this.getContentText(part.content);
+                        if (reserve.truncateOn && trText.length > reserve.truncateMax) {
+                            const toolName = toolUseIdToName.get(part.tool_use_id) || '';
+                            const r = truncateHeadTailByTool(trText, reserve.truncateMax, toolName);
+                            if (r.truncated) {
+                                logger.info(`[Kiro] Truncated tool_result (tool=${toolName}, ${trText.length} -> ${r.text.length})`);
+                                trText = r.text;
+                            }
+                        }
                         currentToolResults.push({
-                            content: [{ text: this.getContentText(part.content) }],
+                            content: [{ text: trText }],
                             status: 'success',
                             toolUseId: part.tool_use_id
                         });
@@ -3077,6 +3154,16 @@ async saveCredentialsToFile(filePath, newData) {
             // Claude API 语义: total_input = input_tokens + cache_creation + cache_read
             const nonCachedInputTokens = Math.max(0, inputTokens - cacheCreationTokens - cacheReadTokens);
 
+            // 措施 1: 上下文压力膨胀（仅 message_delta）
+            const reserve = getOutputReserveConfig(this.config);
+            const inflationDelta = reserve.pressureFactor > 1.0
+                ? Math.max(1000, Math.round(inputTokens * (reserve.pressureFactor - 1)))
+                : 0;
+            const reportedNonCached = nonCachedInputTokens + inflationDelta;
+            if (inflationDelta > 0) {
+                logger.info(`[Kiro Pressure] message_delta: realInput=${inputTokens} nonCached=${nonCachedInputTokens} reported=${reportedNonCached} delta=${inflationDelta}`);
+            }
+
             // 5. 发送 message_delta 事件
             // 重要：不要把上游截断 / thinking-only 报为 max_tokens，
             // 否则 Claude Code 客户端会误判为输出超 64K 上限并弹错误对话框。
@@ -3093,7 +3180,7 @@ async saveCredentialsToFile(filePath, newData) {
                 type: "message_delta",
                 delta: { stop_reason: stopReason },
                 usage: {
-                    input_tokens: nonCachedInputTokens,
+                    input_tokens: reportedNonCached,
                     output_tokens: outputTokens,
                     cache_creation_input_tokens: cacheCreationTokens,
                     cache_read_input_tokens: cacheReadTokens
