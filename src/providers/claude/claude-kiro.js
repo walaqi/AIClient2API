@@ -1912,16 +1912,13 @@ async saveCredentialsToFile(filePath, newData) {
                 throw error;
             }
             
-            // Handle 429 (Too Many Requests) - wait baseDelay then switch credential
+            // Handle 429 (Too Many Requests) - retry same credential, don't switch
             if (status === 429) {
                 const retryAfter = this._getRetryAfter(error);
                 const bodyText = this._getErrorResponseText(error);
                 logger.warn(`[Kiro] Received 429 (Too Many Requests). Retry-After=${retryAfter || 'none'}, Body=${(bodyText || '').substring(0, 800)}`);
-                logger.info(`[Kiro] Waiting ${baseDelay}ms before switching credential...`);
-                await new Promise(resolve => setTimeout(resolve, baseDelay));
-                // Mark error for credential switch without recording error count
-                error.shouldSwitchCredential = true;
                 error.skipErrorCount = true;
+                if (retryAfter) error.retryAfterMs = retryAfter;
                 throw error;
             }
 
@@ -2503,16 +2500,13 @@ async saveCredentialsToFile(filePath, newData) {
                 throw error;
             }
             
-            // Handle 429 (Too Many Requests) - wait baseDelay then switch credential
+            // Handle 429 (Too Many Requests) - retry same credential, don't switch
             if (status === 429) {
                 const retryAfter = this._getRetryAfter(error);
                 const bodyText = await this._readErrorResponseBody(error);
                 logger.warn(`[Kiro] Received 429 (Too Many Requests) in stream. Retry-After=${retryAfter || 'none'}, Body=${(bodyText || '').substring(0, 800)}`);
-                logger.info(`[Kiro] Waiting ${baseDelay}ms before switching credential...`);
-                await new Promise(resolve => setTimeout(resolve, baseDelay));
-                // Mark error for credential switch without recording error count
-                error.shouldSwitchCredential = true;
                 error.skipErrorCount = true;
+                if (retryAfter) error.retryAfterMs = retryAfter;
                 throw error;
             }
 

@@ -284,7 +284,7 @@ export async function handleUIApiRequests(method, pathParam, req, res, currentCo
     const deleteConfigMatch = pathParam.match(/^\/api\/upload-configs\/delete\/(.+)$/);
     if (method === 'DELETE' && deleteConfigMatch) {
         const filePath = decodeURIComponent(deleteConfigMatch[1]);
-        return await uploadConfigApi.handleDeleteConfigFile(req, res, filePath);
+        return await uploadConfigApi.handleDeleteConfigFile(req, res, filePath, currentConfig, providerPoolManager);
     }
 
     // Force expire specific configuration file

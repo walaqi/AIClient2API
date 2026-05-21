@@ -612,6 +612,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
     // maxRetries: 凭证切换最大次数（跨凭证），默认 5 次
     const maxRetries = retryContext?.maxRetries ?? 5;
     const currentRetry = retryContext?.currentRetry ?? 0;
+    const rateLimitRetry = retryContext?.rateLimitRetry ?? 0;
     const CONFIG = retryContext?.CONFIG;
     const isRetry = currentRetry > 0;
     
@@ -819,21 +820,40 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         
         // 检查是否应该跳过错误计数（用于 429/5xx 等需要直接切换凭证的情况）
         const skipErrorCount = error.skipErrorCount === true;
-        // 检查是否应该切换凭证（用于 429/5xx/402/403 等情况）
+        // 检查是否应该切换凭证（用于 5xx/402/403 等严重错误情况）
         const shouldSwitchCredential = error.shouldSwitchCredential === true;
-        
+
         // 检查凭证是否已在底层被标记为不健康（避免重复标记）
         let credentialMarkedUnhealthy = error.credentialMarkedUnhealthy === true;
 
         const rateLimitRecoveryTime = getRateLimitCooldownRecoveryTime(error, CONFIG);
-        if (rateLimitRecoveryTime && providerPoolManager && pooluuid) {
-            logger.info(`[Provider Pool] Applying 429 cooldown for ${toProvider} (${pooluuid}) until ${rateLimitRecoveryTime.toISOString()}`);
-            providerPoolManager.markProviderUnhealthyWithRecoveryTime(toProvider, {
-                uuid: pooluuid
-            }, '429 Too Many Requests - short cooldown', rateLimitRecoveryTime);
-            credentialMarkedUnhealthy = true;
+        const is429 = Number(status) === 429;
+        if ((rateLimitRecoveryTime || is429) && providerPoolManager && pooluuid) {
+            // 429 is temporary rate limit - retry same provider, don't mark unhealthy
+            if (rateLimitRetry < 3) {
+                const retryAfterDelay = error.retryAfterMs || 0;
+                const randomDelay = retryAfterDelay > 0 ? retryAfterDelay : Math.floor(Math.random() * 10000);
+                logger.info(`[Stream Retry] 429 rate limit for ${toProvider} (${pooluuid}). Waiting ${randomDelay}ms before retrying same provider (rateLimitRetry ${rateLimitRetry + 1}/3)...`);
+                await new Promise(resolve => setTimeout(resolve, randomDelay));
+
+                const newRetryContext = {
+                    ...retryContext,
+                    CONFIG,
+                    currentRetry,
+                    maxRetries,
+                    rateLimitRetry: rateLimitRetry + 1,
+                    clientDisconnected,
+                    anyDataSent
+                };
+
+                return await handleStreamRequest(
+                    res, service, model, requestBody, fromProvider, toProvider,
+                    PROMPT_LOG_MODE, PROMPT_LOG_FILENAME,
+                    providerPoolManager, pooluuid, customName, newRetryContext
+                );
+            }
         }
-        
+
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
             // 400 报错码通常是请求参数问题，不记录为提供商错误
@@ -976,6 +996,7 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
     // maxRetries: 凭证切换最大次数（跨凭证），默认 5 次
     const maxRetries = retryContext?.maxRetries ?? 5;
     const currentRetry = retryContext?.currentRetry ?? 0;
+    const rateLimitRetry = retryContext?.rateLimitRetry ?? 0;
     const CONFIG = retryContext?.CONFIG;
     
     try{
@@ -1030,21 +1051,38 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         
         // 检查是否应该跳过错误计数（用于 429/5xx 等需要直接切换凭证的情况）
         const skipErrorCount = error.skipErrorCount === true;
-        // 检查是否应该切换凭证（用于 429/5xx/402/403 等情况）
+        // 检查是否应该切换凭证（用于 5xx/402/403 等严重错误情况）
         const shouldSwitchCredential = error.shouldSwitchCredential === true;
         
         // 检查凭证是否已在底层被标记为不健康（避免重复标记）
         let credentialMarkedUnhealthy = error.credentialMarkedUnhealthy === true;
 
         const rateLimitRecoveryTime = getRateLimitCooldownRecoveryTime(error, CONFIG);
-        if (rateLimitRecoveryTime && providerPoolManager && pooluuid) {
-            logger.info(`[Provider Pool] Applying 429 cooldown for ${toProvider} (${pooluuid}) until ${rateLimitRecoveryTime.toISOString()}`);
-            providerPoolManager.markProviderUnhealthyWithRecoveryTime(toProvider, {
-                uuid: pooluuid
-            }, '429 Too Many Requests - short cooldown', rateLimitRecoveryTime);
-            credentialMarkedUnhealthy = true;
+        const is429 = Number(status) === 429;
+        if ((rateLimitRecoveryTime || is429) && providerPoolManager && pooluuid) {
+            // 429 is temporary rate limit - retry same provider, don't mark unhealthy
+            if (rateLimitRetry < 3) {
+                const retryAfterDelay = error.retryAfterMs || 0;
+                const randomDelay = retryAfterDelay > 0 ? retryAfterDelay : Math.floor(Math.random() * 10000);
+                logger.info(`[Unary Retry] 429 rate limit for ${toProvider} (${pooluuid}). Waiting ${randomDelay}ms before retrying same provider (rateLimitRetry ${rateLimitRetry + 1}/3)...`);
+                await new Promise(resolve => setTimeout(resolve, randomDelay));
+
+                const newRetryContext = {
+                    ...retryContext,
+                    CONFIG,
+                    currentRetry,
+                    maxRetries,
+                    rateLimitRetry: rateLimitRetry + 1
+                };
+
+                return await handleUnaryRequest(
+                    res, service, model, requestBody, fromProvider, toProvider,
+                    PROMPT_LOG_MODE, PROMPT_LOG_FILENAME,
+                    providerPoolManager, pooluuid, customName, newRetryContext
+                );
+            }
         }
-        
+
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
             // 400 报错码通常是请求参数问题，不记录为提供商错误

@@ -522,6 +522,11 @@ async function _handleAddProvider(req, res, currentConfig, providerPoolManager, 
             providerPoolManager.initializeProviderStatus();
         }
 
+        // Sync CONFIG reference to avoid stale reads by autoLinkProviderConfigs
+        if (currentConfig) {
+            currentConfig.providerPools = providerPools;
+        }
+
         // 广播更新事件
         broadcastEvent('config_update', {
             action: 'add',
@@ -637,6 +642,11 @@ async function _handleUpdateProvider(req, res, currentConfig, providerPoolManage
             providerPoolManager.initializeProviderStatus();
         }
 
+        // Sync CONFIG reference to avoid stale reads by autoLinkProviderConfigs
+        if (currentConfig) {
+            currentConfig.providerPools = providerPools;
+        }
+
         // 广播更新事件
         broadcastEvent('config_update', {
             action: 'update',
@@ -715,6 +725,11 @@ async function _handleDeleteProvider(req, res, currentConfig, providerPoolManage
         if (providerPoolManager) {
             providerPoolManager.providerPools = providerPools;
             providerPoolManager.initializeProviderStatus();
+        }
+
+        // Sync CONFIG reference to avoid stale reads by autoLinkProviderConfigs
+        if (currentConfig) {
+            currentConfig.providerPools = providerPools;
         }
 
         // 广播更新事件

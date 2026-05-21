@@ -140,15 +140,15 @@ export async function handleDownloadConfigFile(req, res, filePath) {
 /**
  * 删除特定配置文件
  */
-export async function handleDeleteConfigFile(req, res, filePath) {
+export async function handleDeleteConfigFile(req, res, filePath, currentConfig, providerPoolManager) {
     try {
         const fullPath = path.join(process.cwd(), filePath);
-        
+
         // 安全检查：确保文件路径在允许的目录内
         const allowedDirs = ['configs'];
         const relativePath = path.relative(process.cwd(), fullPath);
         const isAllowed = allowedDirs.some(dir => relativePath.startsWith(dir + path.sep) || relativePath === dir);
-        
+
         if (!isAllowed) {
             res.writeHead(403, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
@@ -158,7 +158,7 @@ export async function handleDeleteConfigFile(req, res, filePath) {
             }));
             return true;
         }
-        
+
         if (!existsSync(fullPath)) {
             res.writeHead(404, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
@@ -168,17 +168,20 @@ export async function handleDeleteConfigFile(req, res, filePath) {
             }));
             return true;
         }
-        
-        
+
+
         await fs.unlink(fullPath);
-        
+
+        // Auto-remove provider pool entries referencing this credential file
+        await _removePoolEntriesForDeletedFile(relativePath, currentConfig, providerPoolManager);
+
         // 广播更新事件
         broadcastEvent('config_update', {
             action: 'delete',
             filePath: relativePath,
             timestamp: new Date().toISOString()
         });
-        
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             success: true,
@@ -195,6 +198,54 @@ export async function handleDeleteConfigFile(req, res, filePath) {
             }
         }));
         return true;
+    }
+}
+
+/**
+ * Auto-remove provider pool entries that reference a deleted credential file
+ */
+async function _removePoolEntriesForDeletedFile(deletedRelativePath, currentConfig, providerPoolManager) {
+    if (!currentConfig || !providerPoolManager) return;
+
+    const { PROVIDER_MAPPINGS } = await import('../utils/provider-utils.js');
+    const credPathKeys = PROVIDER_MAPPINGS.map(m => m.credPathKey).filter(Boolean);
+
+    const providerPools = providerPoolManager.providerPools || {};
+    const normalizedDeleted = deletedRelativePath.replace(/\\/g, '/');
+    let removedCount = 0;
+
+    for (const [providerType, providers] of Object.entries(providerPools)) {
+        if (!Array.isArray(providers)) continue;
+        const before = providers.length;
+        providerPools[providerType] = providers.filter(provider => {
+            for (const key of credPathKeys) {
+                const credPath = provider[key];
+                if (!credPath) continue;
+                const normalizedCred = credPath.replace(/\\/g, '/');
+                if (normalizedCred === normalizedDeleted) return false;
+            }
+            return true;
+        });
+        removedCount += before - providerPools[providerType].length;
+        if (providerPools[providerType].length === 0) {
+            delete providerPools[providerType];
+        }
+    }
+
+    if (removedCount > 0) {
+        const { atomicWriteFile } = await import('../utils/file-lock.js');
+        const poolFilePath = currentConfig.PROVIDER_POOLS_FILE_PATH || 'configs/provider_pools.json';
+        await atomicWriteFile(poolFilePath, JSON.stringify(providerPools, null, 2), 'utf-8');
+        providerPoolManager.providerPools = providerPools;
+        providerPoolManager.initializeProviderStatus();
+        currentConfig.providerPools = providerPools;
+        logger.info(`[UI API] Auto-removed ${removedCount} provider pool entries referencing deleted file: ${deletedRelativePath}`);
+        broadcastEvent('provider_update', {
+            action: 'auto_cleanup',
+            removedCount,
+            deletedFile: deletedRelativePath,
+            timestamp: new Date().toISOString()
+        });
     }
 }
 
