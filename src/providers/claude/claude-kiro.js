@@ -387,6 +387,21 @@ function repairJson(jsonStr) {
     return repaired;
 }
 
+function repairToolInputJson(inputStr) {
+    if (typeof inputStr !== 'string') return inputStr;
+    try { JSON.parse(inputStr); return inputStr; } catch (e) {}
+    const repaired = inputStr.replace(/\}(,\s*")/, '$1');
+    try { JSON.parse(repaired); return repaired; } catch (e) {}
+    return inputStr;
+}
+
+function isIncompleteFileToolCall(toolName, parsedInput) {
+    if (typeof parsedInput !== 'object' || parsedInput === null) return false;
+    const name = String(toolName || '');
+    if (!(name.includes('Write') || name.includes('Edit') || name.includes('write') || name.includes('create_text_file'))) return false;
+    return parsedInput.file_path && !parsedInput.content;
+}
+
 /**
  * 从损坏的 JSON 中提取关键凭证字段
  * 当标准 JSON 解析和 repairJson 都失败时使用
@@ -1662,7 +1677,33 @@ async saveCredentialsToFile(filePath, newData) {
                                 const args = JSON.parse(currentToolCallDict.function.arguments);
                                 currentToolCallDict.function.arguments = JSON.stringify(args);
                             } catch (e) {
-                                logger.warn(`[Kiro] Tool call arguments not valid JSON: ${currentToolCallDict.function.arguments}`);
+                                const repaired = repairToolInputJson(currentToolCallDict.function.arguments);
+                                try {
+                                    JSON.parse(repaired);
+                                    currentToolCallDict.function.arguments = repaired;
+                                } catch (e2) {
+                                    logger.warn(`[Kiro] Tool call arguments not valid JSON: ${currentToolCallDict.function.arguments}`);
+                                }
+                            }
+                            toolCalls.push(currentToolCallDict);
+                            currentToolCallDict = null;
+                        }
+                    } else if (eventData.toolUseId && eventData.input !== undefined && !eventData.name) {
+                        if (currentToolCallDict && currentToolCallDict.id === eventData.toolUseId) {
+                            currentToolCallDict.function.arguments += normalizeKiroToolInput(eventData.input);
+                        }
+                        if (eventData.stop && currentToolCallDict) {
+                            try {
+                                const args = JSON.parse(currentToolCallDict.function.arguments);
+                                currentToolCallDict.function.arguments = JSON.stringify(args);
+                            } catch (e) {
+                                const repaired = repairToolInputJson(currentToolCallDict.function.arguments);
+                                try {
+                                    JSON.parse(repaired);
+                                    currentToolCallDict.function.arguments = repaired;
+                                } catch (e2) {
+                                    logger.warn(`[Kiro] Tool call arguments not valid JSON: ${currentToolCallDict.function.arguments}`);
+                                }
                             }
                             toolCalls.push(currentToolCallDict);
                             currentToolCallDict = null;
@@ -2767,13 +2808,18 @@ async saveCredentialsToFile(filePath, newData) {
                                 try {
                                     parsedInput = JSON.parse(currentToolCall.input);
                                 } catch (e) {
-                                    // input 不是有效 JSON，保持原样
+                                    const repaired = repairToolInputJson(currentToolCall.input);
+                                    try { parsedInput = JSON.parse(repaired); } catch (e2) {}
                                 }
-                                toolCalls.push({
-                                    toolUseId: currentToolCall.toolUseId,
-                                    name: currentToolCall.name,
-                                    input: parsedInput
-                                });
+                                if (!isIncompleteFileToolCall(currentToolCall.name, parsedInput)) {
+                                    toolCalls.push({
+                                        toolUseId: currentToolCall.toolUseId,
+                                        name: currentToolCall.name,
+                                        input: parsedInput
+                                    });
+                                } else {
+                                    logger.warn(`[Kiro Stream] Dropping truncated tool call '${currentToolCall.name}' at tool switch`);
+                                }
                                 if (prevBlockIndex != null) {
                                     toolEvents.push({ type: "content_block_stop", index: prevBlockIndex });
                                     toolUseBlockIndexes.delete(currentToolCall.toolUseId);
@@ -2822,13 +2868,19 @@ async saveCredentialsToFile(filePath, newData) {
                             try {
                                 parsedInput = JSON.parse(currentToolCall.input);
                             } catch (e) {
-                                // input 不是有效 JSON，保持原样
+                                const repaired = repairToolInputJson(currentToolCall.input);
+                                try { parsedInput = JSON.parse(repaired); } catch (e2) {}
                             }
-                            toolCalls.push({
-                                toolUseId: currentToolCall.toolUseId,
-                                name: currentToolCall.name,
-                                input: parsedInput
-                            });
+
+                            if (isIncompleteFileToolCall(currentToolCall.name, parsedInput)) {
+                                logger.warn(`[Kiro Stream] Dropping truncated tool call '${currentToolCall.name}' at tc.stop`);
+                            } else {
+                                toolCalls.push({
+                                    toolUseId: currentToolCall.toolUseId,
+                                    name: currentToolCall.name,
+                                    input: parsedInput
+                                });
+                            }
 
                             const blockIndex = toolUseBlockIndexes.get(currentToolCall.toolUseId);
                             if (blockIndex != null) {
@@ -2870,15 +2922,21 @@ async saveCredentialsToFile(filePath, newData) {
                         try {
                             parsedInput = JSON.parse(currentToolCall.input);
                         } catch (e) {
-                            // input 不是有效 JSON，保持原样
+                            const repaired = repairToolInputJson(currentToolCall.input);
+                            try { parsedInput = JSON.parse(repaired); } catch (e2) {}
                         }
-                        toolCalls.push({
-                            toolUseId: currentToolCall.toolUseId,
-                            name: currentToolCall.name,
-                            input: parsedInput
-                        });
 
                         const blockIndex = toolUseBlockIndexes.get(currentToolCall.toolUseId);
+                        if (isIncompleteFileToolCall(currentToolCall.name, parsedInput)) {
+                            logger.warn(`[Kiro Stream] Dropping truncated tool call '${currentToolCall.name}' at stop event`);
+                        } else {
+                            toolCalls.push({
+                                toolUseId: currentToolCall.toolUseId,
+                                name: currentToolCall.name,
+                                input: parsedInput
+                            });
+                        }
+
                         if (blockIndex != null) {
                             yield* pushEvents([{ type: "content_block_stop", index: blockIndex }]);
                             toolUseBlockIndexes.delete(currentToolCall.toolUseId);
@@ -2895,16 +2953,27 @@ async saveCredentialsToFile(filePath, newData) {
                 let parsedInput = currentToolCall.input;
                 try {
                     parsedInput = JSON.parse(currentToolCall.input);
-                } catch (e) {}
-                toolCalls.push({
-                    toolUseId: currentToolCall.toolUseId,
-                    name: currentToolCall.name,
-                    input: parsedInput
-                });
+                } catch (e) {
+                    const repaired = repairToolInputJson(currentToolCall.input);
+                    try { parsedInput = JSON.parse(repaired); } catch (e2) {}
+                }
                 const blockIndex = toolUseBlockIndexes.get(currentToolCall.toolUseId);
-                if (blockIndex != null) {
-                    yield* pushEvents([{ type: "content_block_stop", index: blockIndex }]);
-                    toolUseBlockIndexes.delete(currentToolCall.toolUseId);
+                if (isIncompleteFileToolCall(currentToolCall.name, parsedInput)) {
+                    logger.warn(`[Kiro Stream] Dropping truncated tool call '${currentToolCall.name}' (missing content). Input keys: ${typeof parsedInput === 'object' ? Object.keys(parsedInput).join(',') : 'unparsed'}`);
+                    if (blockIndex != null) {
+                        yield* pushEvents([{ type: "content_block_stop", index: blockIndex }]);
+                        toolUseBlockIndexes.delete(currentToolCall.toolUseId);
+                    }
+                } else {
+                    toolCalls.push({
+                        toolUseId: currentToolCall.toolUseId,
+                        name: currentToolCall.name,
+                        input: parsedInput
+                    });
+                    if (blockIndex != null) {
+                        yield* pushEvents([{ type: "content_block_stop", index: blockIndex }]);
+                        toolUseBlockIndexes.delete(currentToolCall.toolUseId);
+                    }
                 }
                 currentToolCall = null;
             }
@@ -2952,6 +3021,7 @@ async saveCredentialsToFile(filePath, newData) {
                 logger.warn('[Kiro Stream] Thinking-only response received; not injecting any fallback text');
             }
 
+            yield* pushEvents(stopBlock(streamState.thinkingBlockIndex));
             yield* pushEvents(stopBlock(streamState.textBlockIndex));
 
             // 诊断：记录流的最终状态

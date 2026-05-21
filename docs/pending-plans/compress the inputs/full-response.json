@@ -1,0 +1,2992 @@
+[
+    {
+        "message": {
+            "content": [],
+            "id": "e1d70b0d-9853-4e41-95c4-4b558a805fc6",
+            "model": "claude-opus-4-7",
+            "role": "assistant",
+            "type": "message",
+            "usage": {
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "input_tokens": 42471,
+                "output_tokens": 0
+            }
+        },
+        "type": "message_start"
+    },
+    {
+        "content_block": {
+            "thinking": "",
+            "type": "thinking"
+        },
+        "index": 0,
+        "type": "content_block_start"
+    },
+    {
+        "delta": {
+            "thinking": " I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "'m",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " working",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " through",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " plan",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " now",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ". The key change is in `",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "src/core/config-manager.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "js` where the `initializeConfig",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "` function needs",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " to distinguish",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " between a",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " missing config file",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " and a corru",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "pted one",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "—",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "currently",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " it catches",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " all",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " JSON parse errors and falls back to defaults",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ", but we",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " should",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " make",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " it exit the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " process when the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " file",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " exists",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " but can",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "'t be parsed.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "\n\nThe",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " tr",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "icky part is handling",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the reload",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " flow",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " in",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " `src/ui",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "modules",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "/config",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-api",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".js`,",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " which",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " wr",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "aps the config initialization",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " in try",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "/",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "catch and",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " returns errors",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " to the UI without",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " term",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "inating the server",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " If",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " throw",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " error from `",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "initializeConfig`",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " instead",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " of",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " sil",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ently falling",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " back, the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " startup",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " handler",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " in",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " `api",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "server",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".js` will catch it and exit",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " process, while",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " a",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " UI",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "initiated",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " reload will catch",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " it",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " and just",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " return",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " error to",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the user without",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " killing the server.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " This approach",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " naturally",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " gives",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " us",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the behavior",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " user wants—",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "exit",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " on",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " startup",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parse",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " errors,",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " but grac",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "eful",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " error",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " handling during",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " re",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "loads.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "content_block": {
+            "id": "tooluse_JzfEZz8B5NaZiwOMuZA0xG",
+            "input": {},
+            "name": "Write",
+            "type": "tool_use"
+        },
+        "index": 1,
+        "type": "content_block_start"
+    },
+    {
+        "delta": {
+            "partial_json": "{\"file_path\"",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": ": \"/home/chr",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "is/.clau",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "de/",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "plans/co",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "nfig-",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "json-shi",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "ny-seal",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": ".md\"",
+            "type": "input_json_delta"
+        },
+        "index": 1,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " Now",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I'm moving",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " into the planning",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " phase and",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " need to write",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " out",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " plan file",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "index": 1,
+        "type": "content_block_stop"
+    },
+    {
+        "content_block": {
+            "id": "tooluse_OkxlgH5FZK8m8TuXFsZqzx",
+            "input": {},
+            "name": "Write",
+            "type": "tool_use"
+        },
+        "index": 2,
+        "type": "content_block_start"
+    },
+    {
+        "delta": {
+            "partial_json": "{\"file",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "_pa",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "th\"",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": ": \"/",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "hom",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "e/chris",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "/.cla",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "ude/",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "plans",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "/confi",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "g-js",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "on-shiny",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "-seal.md\"",
+            "type": "input_json_delta"
+        },
+        "index": 2,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "'m",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " creating",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " a plan",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " file",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " to document",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the changes",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " needed for",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " config",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".json parsing errors to trigger",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " system",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " exit",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " instead of falling back to defaults.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "'ve already reviewed",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the config",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "manager code",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " where",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " JSON",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parse",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " errors are currently",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " being",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " caught,",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " so",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " now",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I need to outline",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the specific modifications",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " required.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "\n\nThe",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " key",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " insight",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " is that init",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ializeConfig",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " has",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " two",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " different",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " cal",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "lers with",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " different requirements",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " —",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " server",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " startup",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " should",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " exit on",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parse errors, but",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the UI",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " reload",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " endpoint",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " should handle",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " errors",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " gracefully without",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " term",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "inating the process",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ". The",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " clean",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "est solution is to throw",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parse",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " error from",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " initializeConfig and let each",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " caller handle it appropriately,",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " since",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the startup",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " path already",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " has a",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " `.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "catch` that",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " calls",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " process",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".exit(",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "1)",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " and",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the UI reload already",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " wr",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "aps the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " call",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " in try",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "/catch.\n\nI",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "'m",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " also thinking",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " through",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the distinction",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " between different",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " error",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " types —",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parse",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " errors and",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " read",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " errors should",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " probably",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " trigger",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " exit, but",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " file",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "not",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-found might",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " keep",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the current",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " default",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " behavior since",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " user specifically",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " mentioned",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " \"",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "解",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "析错误\" (",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "parsing",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " errors).",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " need",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " to create",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " a plan file",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " for handling",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " config.json parsing error scenario",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ". The",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " user wants the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " system to exit immediately",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " when",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parsing",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " fails instead",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " of falling",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " back to default values.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "'ve",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " identified the issue in the config-manager",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".js file where the error",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " handling currently",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " allows",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the application",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " to continue.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "\n\nThe",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " key",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " insight",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " is that I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " need to distinguish between different",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " error",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " types:",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " if",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " file doesn't exist (",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ENOENT), keep",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the current default",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " behavior,",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " but if there's a JSON",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parse",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " error (SyntaxError), throw",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " an",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " exception",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " This way, during",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " startup the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " process will",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " exit clean",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ly,",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " and during UI reload the error",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " gets",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " caught and returned to the UI without cr",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ashing the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " server",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": ".",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " need",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " to distinguish",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " between file",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "not-found (",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "which",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " should keep",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " current",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " first",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-run behavior of",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " using",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " defaults) versus",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " actual",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parse errors like",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " S",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "yntaxError,",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " which",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " should fail",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " loud",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ly.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " The",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " fix",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " is straight",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "forward: in",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the config",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "manager",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " catch",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " block, only",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " r",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ethrow non-ENOENT",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " errors so",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " that",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " parse",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " failures",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " propag",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ate up",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " and",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " cause",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the startup",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " to exit clean",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "ly.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " I",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " should",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " ask",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " user whether",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " they want file",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-not-found to also",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " trigger",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " an",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " exit, or if keeping",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " the default-",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "fall",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "back behavior for",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " first",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": "-run scenarios",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "thinking": " is acceptable.",
+            "type": "thinking_delta"
+        },
+        "index": 0,
+        "type": "content_block_delta"
+    },
+    {
+        "index": 2,
+        "type": "content_block_stop"
+    },
+    {
+        "content_block": {
+            "id": "tooluse_1BbHxJRmRrmO2LstRlmqv2",
+            "input": {},
+            "name": "Write",
+            "type": "tool_use"
+        },
+        "index": 3,
+        "type": "content_block_start"
+    },
+    {
+        "delta": {
+            "partial_json": "{\"file_pat",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "h\": ",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "\"/home/",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "chris/.c",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "laude/pla",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "ns/config",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "-json-sh",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "iny-seal.",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    },
+    {
+        "delta": {
+            "partial_json": "md\"",
+            "type": "input_json_delta"
+        },
+        "index": 3,
+        "type": "content_block_delta"
+    }
+]
