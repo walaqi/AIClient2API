@@ -606,6 +606,7 @@ export class KiroApiService {
         this.credPath = config.KIRO_OAUTH_CREDS_DIR_PATH || path.join(os.homedir(), ".aws", "sso", "cache");
         this.credsBase64 = config.KIRO_OAUTH_CREDS_BASE64;
         this.uuid = config?.uuid;
+        this._nodeName = config?.customName || (config?.uuid ? config.uuid.substring(0, 8) : 'unknown');
         // this.accessToken = config.KIRO_ACCESS_TOKEN;
         // this.refreshToken = config.KIRO_REFRESH_TOKEN;
         // this.clientId = config.KIRO_CLIENT_ID;
@@ -1880,7 +1881,7 @@ async saveCredentialsToFile(filePath, newData) {
             
             // Handle 401 (Unauthorized) - refresh UUID first, then try to refresh token
             if (status === 401 && !isRetry) {
-                logger.info('[Kiro] Received 401. Refreshing UUID and triggering background refresh via PoolManager...');
+                logger.info(`[Kiro][${this._nodeName}] Received 401. Refreshing UUID and triggering background refresh via PoolManager...`);
                 
                 // 1. 先刷新 UUID
                 const newUuid = this._refreshUuid();
@@ -1916,7 +1917,7 @@ async saveCredentialsToFile(filePath, newData) {
             if (status === 429) {
                 const retryAfter = this._getRetryAfter(error);
                 const bodyText = this._getErrorResponseText(error);
-                logger.warn(`[Kiro] Received 429 (Too Many Requests). Retry-After=${retryAfter || 'none'}, Body=${(bodyText || '').substring(0, 800)}`);
+                logger.warn(`[Kiro][${this._nodeName}] Received 429 (Too Many Requests). Retry-After=${retryAfter || 'none'}, Body=${(bodyText || '').substring(0, 800)}`);
                 error.skipErrorCount = true;
                 if (retryAfter) error.retryAfterMs = retryAfter;
                 throw error;
@@ -1925,8 +1926,8 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 5xx server errors - wait baseDelay then switch credential
             if (status >= 500 && status < 600) {
                 const bodyText = this._getErrorResponseText(error);
-                logger.warn(`[Kiro] Received ${status} server error. Body=${(bodyText || '').substring(0, 800)}`);
-                logger.info(`[Kiro] Waiting ${baseDelay}ms before switching credential...`);
+                logger.warn(`[Kiro][${this._nodeName}] Received ${status} server error. Body=${(bodyText || '').substring(0, 800)}`);
+                logger.info(`[Kiro][${this._nodeName}] Waiting ${baseDelay}ms before switching credential...`);
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -1938,13 +1939,13 @@ async saveCredentialsToFile(filePath, newData) {
             if (isNetworkError && retryCount < maxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
                 const errorIdentifier = errorCode || errorMessage.substring(0, 50);
-                logger.info(`[Kiro] Network error (${errorIdentifier}). Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.info(`[Kiro][${this._nodeName}] Network error (${errorIdentifier}). Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 return this.callApi(method, model, body, isRetry, retryCount + 1);
             }
 
-            if (error.response && error.response.data) { logger.error('[Kiro] 400 Response body:', typeof error.response.data === 'string' ? error.response.data.substring(0, 500) : JSON.stringify(error.response.data).substring(0, 500)); }
-            logger.error(`[Kiro] API call failed (Status: ${status}, Code: ${errorCode}):`, error.message);
+            if (error.response && error.response.data) { logger.error(`[Kiro][${this._nodeName}] 400 Response body:`, typeof error.response.data === 'string' ? error.response.data.substring(0, 500) : JSON.stringify(error.response.data).substring(0, 500)); }
+            logger.error(`[Kiro][${this._nodeName}] API call failed (Status: ${status}, Code: ${errorCode}):`, error.message);
             throw error;
         }
     }
@@ -2504,7 +2505,7 @@ async saveCredentialsToFile(filePath, newData) {
             if (status === 429) {
                 const retryAfter = this._getRetryAfter(error);
                 const bodyText = await this._readErrorResponseBody(error);
-                logger.warn(`[Kiro] Received 429 (Too Many Requests) in stream. Retry-After=${retryAfter || 'none'}, Body=${(bodyText || '').substring(0, 800)}`);
+                logger.warn(`[Kiro][${this._nodeName}] Received 429 (Too Many Requests) in stream. Retry-After=${retryAfter || 'none'}, Body=${(bodyText || '').substring(0, 800)}`);
                 error.skipErrorCount = true;
                 if (retryAfter) error.retryAfterMs = retryAfter;
                 throw error;
@@ -2513,8 +2514,8 @@ async saveCredentialsToFile(filePath, newData) {
             // Handle 5xx server errors - wait baseDelay then switch credential
             if (status >= 500 && status < 600) {
                 const bodyText = await this._readErrorResponseBody(error);
-                logger.warn(`[Kiro] Received ${status} server error in stream. Body=${(bodyText || '').substring(0, 800)}`);
-                logger.info(`[Kiro] Waiting ${baseDelay}ms before switching credential...`);
+                logger.warn(`[Kiro][${this._nodeName}] Received ${status} server error in stream. Body=${(bodyText || '').substring(0, 800)}`);
+                logger.info(`[Kiro][${this._nodeName}] Waiting ${baseDelay}ms before switching credential...`);
                 await new Promise(resolve => setTimeout(resolve, baseDelay));
                 // Mark error for credential switch without recording error count
                 error.shouldSwitchCredential = true;
@@ -2526,13 +2527,13 @@ async saveCredentialsToFile(filePath, newData) {
             if (isNetworkError && retryCount < maxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
                 const errorIdentifier = errorCode || errorMessage.substring(0, 50);
-                logger.info(`[Kiro] Network error (${errorIdentifier}) in stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                logger.info(`[Kiro][${this._nodeName}] Network error (${errorIdentifier}) in stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 yield* this.streamApiReal(method, model, body, isRetry, retryCount + 1);
                 return;
             }
 
-            logger.error(`[Kiro] Stream API call failed (Status: ${status}, Code: ${errorCode}):`,  error.message);
+            logger.error(`[Kiro][${this._nodeName}] Stream API call failed (Status: ${status}, Code: ${errorCode}):`,  error.message);
             throw error;
         } finally {
             releaseThrottle();

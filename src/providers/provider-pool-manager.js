@@ -14,6 +14,7 @@ import {
 import { broadcastEvent } from '../ui-modules/event-broadcast.js';
 import { ENDPOINT_TYPE } from '../utils/common.js';
 import { generateFingerprint, hasFingerprint } from '../utils/fingerprint-generator.js';
+import { parseProxyUrl } from '../utils/proxy-utils.js';
 
 function getCustomModelAliasesForProvider(config, providerType) {
     const customModels = Array.isArray(config?.customModels) ? config.customModels : [];
@@ -2039,6 +2040,14 @@ export class ProviderPoolManager {
                 }
 
                 try {
+                    // Proxy geo-validation before API health check
+                    const proxyResult = await this._checkAccountProxy(providerType, providerConfig);
+                    if (!proxyResult.success) {
+                        this._log('warn', `[ProxyGeoCheck] ${this._getDisplayName(providerConfig)} (${providerType}) failed: ${proxyResult.errorMessage}`);
+                        this.markProviderUnhealthy(providerType, providerConfig, proxyResult.errorMessage);
+                        continue;
+                    }
+
                     // Perform actual health check based on provider type
                     const healthResult = await this._checkProviderHealth(providerType, providerConfig);
                     
@@ -2143,6 +2152,16 @@ export class ProviderPoolManager {
             const displayName = this._getDisplayName(provider.config);
 
             try {
+                // Proxy geo-validation before API health check
+                const proxyResult = await this._checkAccountProxy(providerType, provider.config);
+                if (!proxyResult.success) {
+                    failCount++;
+                    const checkDuration = Date.now() - providerCheckStart;
+                    this._log('warn', `[ScheduledHealthCheck] ${displayName} (${providerType}) PROXY FAILED: ${proxyResult.errorMessage} (${checkDuration}ms)`);
+                    this.markProviderUnhealthyImmediately(providerType, provider.config, proxyResult.errorMessage);
+                    continue;
+                }
+
                 // Perform health check (health check is based on providerTypes configuration, not per-provider checkHealth flag)
                 const result = await this._checkProviderHealth(providerType, provider.config);
                 const checkDuration = Date.now() - providerCheckStart;
@@ -2364,6 +2383,100 @@ export class ProviderPoolManager {
         // 所有尝试都失败
         this._log('warn', `[HealthCheck] ${providerType} failed after ${healthCheckRequests.length} attempts: ${lastError?.message}`);
         return { success: false, modelName, errorMessage: lastError?.message || 'All health check attempts failed' };
+    }
+
+    _rotateProxySession(proxyUrl) {
+        const regex = /session-([a-zA-Z0-9]+)-sessionduration/;
+        if (!regex.test(proxyUrl)) {
+            this._log('warn', '[ProxyGeoCheck] Proxy URL does not contain session pattern, cannot rotate');
+            return null;
+        }
+        const chars = 'abcdefghijklmnopqrstuvwxyz';
+        let newSession = '';
+        for (let i = 0; i < 6; i++) {
+            newSession += chars[Math.floor(Math.random() * chars.length)];
+        }
+        return proxyUrl.replace(regex, `session-${newSession}-sessionduration`);
+    }
+
+    async _checkAccountProxy(providerType, providerConfig) {
+        const proxyUrl = providerConfig.ACCOUNT_PROXY_URL;
+        if (!proxyUrl || typeof proxyUrl !== 'string' || !proxyUrl.trim()) {
+            return { success: true, skipped: true };
+        }
+        if (providerConfig.ACCOUNT_PROXY_DISABLED === true) {
+            return { success: true, skipped: true };
+        }
+
+        const rules = this.globalConfig?.PROXY_GEO_VALIDATE_RULES;
+        if (!Array.isArray(rules) || rules.length === 0) {
+            return { success: true, skipped: true };
+        }
+
+        const proxyConfig = parseProxyUrl(proxyUrl);
+        if (!proxyConfig) {
+            return { success: false, errorMessage: '[ProxyGeoCheck] Invalid ACCOUNT_PROXY_URL format' };
+        }
+
+        const axios = (await import('axios')).default;
+        const displayName = this._getDisplayName(providerConfig);
+
+        const checkGeo = async (url) => {
+            const pc = parseProxyUrl(url);
+            if (!pc) return null;
+            const resp = await axios.get('http://ip-api.com/json/?lang=zh-CN', {
+                httpAgent: pc.httpAgent,
+                httpsAgent: pc.httpsAgent,
+                proxy: false,
+                timeout: 5000
+            });
+            return resp.data;
+        };
+
+        const matchesRules = (data) => {
+            if (data?.status !== 'success') return false;
+            return rules.some(r => r.country === data.country && r.city === data.city);
+        };
+
+        // Initial check with current URL
+        let currentUrl = proxyUrl;
+        let lastGeoData = null;
+        try {
+            const data = await checkGeo(currentUrl);
+            lastGeoData = data;
+            if (matchesRules(data)) {
+                this._log('info', `[ProxyGeoCheck] ${displayName} proxy OK: ${data.country} - ${data.city}`);
+                return { success: true, proxyUrl: currentUrl };
+            }
+            this._log('warn', `[ProxyGeoCheck] ${displayName} proxy geo mismatch: got ${data?.country} - ${data?.city}, rotating session...`);
+        } catch (err) {
+            this._log('warn', `[ProxyGeoCheck] ${displayName} proxy request failed (ip-api unreachable): ${err.message}, rotating session...`);
+        }
+
+        // Retry with rotated sessions
+        for (let i = 0; i < 5; i++) {
+            const rotatedUrl = this._rotateProxySession(currentUrl);
+            if (!rotatedUrl) {
+                return { success: false, errorMessage: `[ProxyGeoCheck] Cannot rotate proxy session - no session pattern in URL` };
+            }
+            currentUrl = rotatedUrl;
+            try {
+                const data = await checkGeo(currentUrl);
+                lastGeoData = data;
+                if (matchesRules(data)) {
+                    this._log('info', `[ProxyGeoCheck] ${displayName} proxy OK after rotation (attempt ${i + 1}): ${data.country} - ${data.city}`);
+                    providerConfig.ACCOUNT_PROXY_URL = currentUrl;
+                    this._debouncedSave(providerType);
+                    return { success: true, proxyUrl: currentUrl };
+                }
+                this._log('debug', `[ProxyGeoCheck] ${displayName} rotation attempt ${i + 1} geo mismatch: ${data?.country} - ${data?.city}`);
+            } catch (err) {
+                this._log('debug', `[ProxyGeoCheck] ${displayName} rotation attempt ${i + 1} request failed: ${err.message}`);
+            }
+        }
+
+        const geoInfo = lastGeoData ? `geo mismatch: ${lastGeoData.country} - ${lastGeoData.city}` : 'request failed (ip-api unreachable)';
+        return { success: false, errorMessage: `[ProxyGeoCheck] Proxy validation failed after 5 retries: ${geoInfo}` };
     }
 
     /**
