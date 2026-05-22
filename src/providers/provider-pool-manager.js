@@ -2291,6 +2291,44 @@ export class ProviderPoolManager {
         delete tempConfig.providerPools;
         const serviceAdapter = getServiceAdapter(tempConfig);
 
+        // Pre-probe force-refresh for unhealthy OAuth nodes: if the access_token is dead
+        // but the refresh_token is still valid, exchange it before the probe so the node
+        // can recover. Static-key providers are excluded by absence of an OAuth creds path.
+        const oauthCredsPath =
+            providerConfig.KIRO_OAUTH_CREDS_FILE_PATH ||
+            providerConfig.GEMINI_OAUTH_CREDS_FILE_PATH ||
+            providerConfig.ANTIGRAVITY_OAUTH_CREDS_FILE_PATH ||
+            providerConfig.QWEN_OAUTH_CREDS_FILE_PATH ||
+            providerConfig.IFLOW_OAUTH_CREDS_FILE_PATH ||
+            providerConfig.CODEX_OAUTH_CREDS_FILE_PATH;
+
+        if (!providerConfig.isHealthy && oauthCredsPath) {
+            const uuid = providerConfig.uuid;
+            if (this.refreshingUuids.has(uuid)) {
+                this._log('debug', `[HealthCheck] ${this._getDisplayName(providerConfig)} (${providerType}) already refreshing; skipping pre-probe refresh.`);
+            } else {
+                this.refreshingUuids.add(uuid);
+                try {
+                    this._log('info', `[HealthCheck] Force-refreshing token for unhealthy node ${this._getDisplayName(providerConfig)} (${providerType}) before probe.`);
+                    await this._awaitRefreshWithTimeout(
+                        serviceAdapter.forceRefreshToken(),
+                        providerType,
+                        this._getDisplayName(providerConfig)
+                    );
+                    // Bookkeeping intentionally deferred: if the probe below succeeds,
+                    // markProviderHealthy() resets refreshCount/lastRefreshTime/etc.
+                    // (provider-pool-manager.js:1753-1756). If the probe fails, the
+                    // refresh outcome doesn't earn the node a clean bill of health, so
+                    // leaving counters untouched matches the "probe is the source of
+                    // truth" model used by performHealthChecks.
+                } catch (err) {
+                    this._log('warn', `[HealthCheck] Force refresh failed for ${this._getDisplayName(providerConfig)} (${providerType}): ${err.message}. Proceeding to probe.`);
+                } finally {
+                    this.refreshingUuids.delete(uuid);
+                }
+            }
+        }
+
         // 获取所有可能的请求格式
         const healthCheckRequests = this._buildHealthCheckRequests(providerType, modelName);
 
