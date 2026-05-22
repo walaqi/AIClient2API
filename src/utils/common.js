@@ -829,29 +829,46 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         const rateLimitRecoveryTime = getRateLimitCooldownRecoveryTime(error, CONFIG);
         const is429 = Number(status) === 429;
         if ((rateLimitRecoveryTime || is429) && providerPoolManager && pooluuid) {
-            // 429 is temporary rate limit - retry same provider, don't mark unhealthy
+            if (rateLimitRecoveryTime) {
+                // Cooldown 启用：标记 unhealthy，从调度池移除
+                providerPoolManager.markProviderUnhealthyWithRecoveryTime(
+                    toProvider, { uuid: pooluuid },
+                    '429 Too Many Requests - rate limit cooldown', rateLimitRecoveryTime
+                );
+                credentialMarkedUnhealthy = true;
+                providerPoolManager.record429Hit(toProvider, pooluuid);
+            }
+
+            // 在同一账号上重试（最多 3 次）
             if (rateLimitRetry < 3) {
                 const retryAfterDelay = error.retryAfterMs || 0;
-                const randomDelay = retryAfterDelay > 0 ? retryAfterDelay : Math.floor(Math.random() * 10000);
-                logger.info(`[Stream Retry] 429 rate limit for ${toProvider} (${pooluuid}). Waiting ${randomDelay}ms before retrying same provider (rateLimitRetry ${rateLimitRetry + 1}/3)...`);
+                const randomDelay = retryAfterDelay > 0
+                    ? retryAfterDelay
+                    : Math.floor(Math.random() * 10000);
+                logger.info(`[Stream Retry] 429 for ${toProvider} (${pooluuid}).${rateLimitRecoveryTime ? ` Marked unhealthy, recovery at ${rateLimitRecoveryTime.toISOString()}.` : ''} Waiting ${randomDelay}ms (retry ${rateLimitRetry + 1}/3)...`);
                 await new Promise(resolve => setTimeout(resolve, randomDelay));
 
                 const newRetryContext = {
-                    ...retryContext,
-                    CONFIG,
-                    currentRetry,
-                    maxRetries,
+                    ...retryContext, CONFIG, currentRetry, maxRetries,
                     rateLimitRetry: rateLimitRetry + 1,
-                    clientDisconnected,
-                    anyDataSent
+                    clientDisconnected, anyDataSent
                 };
-
                 return await handleStreamRequest(
                     res, service, model, requestBody, fromProvider, toProvider,
                     PROMPT_LOG_MODE, PROMPT_LOG_FILENAME,
                     providerPoolManager, pooluuid, customName, newRetryContext
                 );
             }
+
+            // 3 次重试耗尽，确保触发凭证切换
+            if (rateLimitRecoveryTime) {
+                logger.info(`[Stream Retry] 429 retries exhausted for ${toProvider} (${pooluuid}). Switching credential immediately.`);
+            } else {
+                // Cooldown 禁用时也需要切换凭证，避免静默失败
+                logger.info(`[Stream Retry] 429 retries exhausted for ${toProvider} (${pooluuid}). Marking unhealthy and switching credential.`);
+                providerPoolManager.markProviderUnhealthy(toProvider, { uuid: pooluuid }, '429 Too Many Requests - retries exhausted');
+            }
+            credentialMarkedUnhealthy = true;
         }
 
         // 如果底层未标记，且不跳过错误计数，则在此处标记
@@ -877,10 +894,14 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         // 凭证已被标记为不健康后，尝试切换到新凭证重试
         // 不再依赖状态码判断，只要凭证被标记不健康且可以重试，就尝试切换
         if (credentialMarkedUnhealthy && currentRetry < maxRetries && providerPoolManager && CONFIG) {
-            // 增加10秒内的随机等待时间，避免所有请求同时切换凭证
-            const randomDelay = Math.floor(Math.random() * 10000); // 0-10000毫秒
-            logger.info(`[Stream Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
-            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            // 429 重试耗尽后立即切换，不需要额外等待
+            if (!is429) {
+                const randomDelay = Math.floor(Math.random() * 10000);
+                logger.info(`[Stream Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
+                await new Promise(resolve => setTimeout(resolve, randomDelay));
+            } else {
+                logger.info(`[Stream Retry] 429 exhausted, switching credential immediately (retry ${currentRetry + 1}/${maxRetries})...`);
+            }
             
             try {
                 // 动态导入以避免循环依赖
@@ -1060,27 +1081,45 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         const rateLimitRecoveryTime = getRateLimitCooldownRecoveryTime(error, CONFIG);
         const is429 = Number(status) === 429;
         if ((rateLimitRecoveryTime || is429) && providerPoolManager && pooluuid) {
-            // 429 is temporary rate limit - retry same provider, don't mark unhealthy
+            if (rateLimitRecoveryTime) {
+                // Cooldown 启用：标记 unhealthy，从调度池移除
+                providerPoolManager.markProviderUnhealthyWithRecoveryTime(
+                    toProvider, { uuid: pooluuid },
+                    '429 Too Many Requests - rate limit cooldown', rateLimitRecoveryTime
+                );
+                credentialMarkedUnhealthy = true;
+                providerPoolManager.record429Hit(toProvider, pooluuid);
+            }
+
+            // 在同一账号上重试（最多 3 次）
             if (rateLimitRetry < 3) {
                 const retryAfterDelay = error.retryAfterMs || 0;
-                const randomDelay = retryAfterDelay > 0 ? retryAfterDelay : Math.floor(Math.random() * 10000);
-                logger.info(`[Unary Retry] 429 rate limit for ${toProvider} (${pooluuid}). Waiting ${randomDelay}ms before retrying same provider (rateLimitRetry ${rateLimitRetry + 1}/3)...`);
+                const randomDelay = retryAfterDelay > 0
+                    ? retryAfterDelay
+                    : Math.floor(Math.random() * 10000);
+                logger.info(`[Unary Retry] 429 for ${toProvider} (${pooluuid}).${rateLimitRecoveryTime ? ` Marked unhealthy, recovery at ${rateLimitRecoveryTime.toISOString()}.` : ''} Waiting ${randomDelay}ms (retry ${rateLimitRetry + 1}/3)...`);
                 await new Promise(resolve => setTimeout(resolve, randomDelay));
 
                 const newRetryContext = {
-                    ...retryContext,
-                    CONFIG,
-                    currentRetry,
-                    maxRetries,
+                    ...retryContext, CONFIG, currentRetry, maxRetries,
                     rateLimitRetry: rateLimitRetry + 1
                 };
-
                 return await handleUnaryRequest(
                     res, service, model, requestBody, fromProvider, toProvider,
                     PROMPT_LOG_MODE, PROMPT_LOG_FILENAME,
                     providerPoolManager, pooluuid, customName, newRetryContext
                 );
             }
+
+            // 3 次重试耗尽，确保触发凭证切换
+            if (rateLimitRecoveryTime) {
+                logger.info(`[Unary Retry] 429 retries exhausted for ${toProvider} (${pooluuid}). Switching credential immediately.`);
+            } else {
+                // Cooldown 禁用时也需要切换凭证，避免静默失败
+                logger.info(`[Unary Retry] 429 retries exhausted for ${toProvider} (${pooluuid}). Marking unhealthy and switching credential.`);
+                providerPoolManager.markProviderUnhealthy(toProvider, { uuid: pooluuid }, '429 Too Many Requests - retries exhausted');
+            }
+            credentialMarkedUnhealthy = true;
         }
 
         // 如果底层未标记，且不跳过错误计数，则在此处标记
@@ -1106,10 +1145,14 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         // 凭证已被标记为不健康后，尝试切换到新凭证重试
         // 不再依赖状态码判断，只要凭证被标记不健康且可以重试，就尝试切换
         if (credentialMarkedUnhealthy && currentRetry < maxRetries && providerPoolManager && CONFIG) {
-            // 增加10秒内的随机等待时间，避免所有请求同时切换凭证
-            const randomDelay = Math.floor(Math.random() * 10000); // 0-10000毫秒
-            logger.info(`[Unary Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
-            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            // 429 重试耗尽后立即切换，不需要额外等待
+            if (!is429) {
+                const randomDelay = Math.floor(Math.random() * 10000);
+                logger.info(`[Unary Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
+                await new Promise(resolve => setTimeout(resolve, randomDelay));
+            } else {
+                logger.info(`[Unary Retry] 429 exhausted, switching credential immediately (retry ${currentRetry + 1}/${maxRetries})...`);
+            }
             
             try {
                 // 动态导入以避免循环依赖

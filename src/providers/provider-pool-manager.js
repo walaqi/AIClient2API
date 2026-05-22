@@ -619,10 +619,15 @@ export class ProviderPoolManager {
         // 惩罚项 C: 负载 (每个活跃请求增加 5 秒权重)
         const loadScore = (state.activeCount || 0) * 5000;
 
+        // 惩罚项 D: 429 频率 (每次近1分钟内的429增加20秒权重)
+        // 1次429 ≈ 2次正常使用的惩罚，使被限流节点恢复后仍被适度降低优先级
+        const rateLimitHits = (state.rateLimitHits || []).filter(t => t > now - 60000).length;
+        const rateLimitScore = rateLimitHits * 20000;
+
         // 新鲜节点的微调：配合 usageScore 和 sequenceScore 在多个新鲜节点间轮询
         const freshBonus = isFresh ? (now - lastHealthCheckTime) : 0;
 
-        return baseScore + usageScore + sequenceScore + loadScore + freshBonus;
+        return baseScore + usageScore + sequenceScore + loadScore + rateLimitScore + freshBonus;
     }
 
     /**
@@ -863,9 +868,13 @@ export class ProviderPoolManager {
                         state: existing ? existing.state : {
                             activeCount: 0,
                             waitingCount: 0,
-                            queue: []
+                            queue: [],
+                            rateLimitHits: []
                         }
                     });
+                    if (existing && !existing.state.rateLimitHits) {
+                        existing.state.rateLimitHits = [];
+                    }
                 } catch (nodeError) {
                     logger.error(`[ProviderPoolManager] Error initializing node for ${providerType}: ${nodeError.message}`);
                 }
@@ -1743,6 +1752,7 @@ export class ProviderPoolManager {
             provider.config.errorCount = 0;
             provider.config.refreshCount = 0;
             provider.config.needsRefresh = false;
+            provider.config.scheduledRecoveryTime = null;
             provider.config.lastRefreshTime = Date.now(); // 标记为健康时也视为刚刷新完成
             provider.config.lastErrorTime = null;
             provider.config.lastErrorMessage = null;
@@ -1771,6 +1781,18 @@ export class ProviderPoolManager {
             
             this._debouncedSave(providerType);
         }
+    }
+
+    /**
+     * Records a 429 hit for a provider (sliding 60s window).
+     */
+    record429Hit(providerType, uuid) {
+        const provider = this._findProvider(providerType, uuid);
+        if (!provider) return;
+        if (!provider.state.rateLimitHits) provider.state.rateLimitHits = [];
+        const now = Date.now();
+        provider.state.rateLimitHits = provider.state.rateLimitHits.filter(t => t > now - 60000);
+        provider.state.rateLimitHits.push(now);
     }
 
     /**
