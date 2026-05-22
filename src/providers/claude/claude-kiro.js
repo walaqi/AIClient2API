@@ -16,7 +16,7 @@ import {
     processContent as processContentUtil,
     getContentText as getContentTextUtil
 } from '../../utils/token-utils.js';
-import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
+import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider, parseProxyUrl } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { calculateCacheTokens } from '../../utils/model-pricing.js';
@@ -1923,13 +1923,16 @@ async saveCredentialsToFile(filePath, newData) {
                 throw error;
             }
 
-            // Handle 5xx server errors - wait baseDelay then switch credential
+            // Handle 5xx server errors
             if (status >= 500 && status < 600) {
                 const bodyText = this._getErrorResponseText(error);
                 logger.warn(`[Kiro][${this._nodeName}] Received ${status} server error. Body=${(bodyText || '').substring(0, 800)}`);
-                logger.info(`[Kiro][${this._nodeName}] Waiting ${baseDelay}ms before switching credential...`);
-                await new Promise(resolve => setTimeout(resolve, baseDelay));
-                // Mark error for credential switch without recording error count
+
+                if (status === 502 && retryCount < maxRetries) {
+                    const proxyRetry = this._tryRotateProxyAndRetryOn502(error, method, model, body, isRetry, retryCount);
+                    if (proxyRetry) return proxyRetry;
+                }
+
                 error.shouldSwitchCredential = true;
                 error.skipErrorCount = true;
                 throw error;
@@ -1995,6 +1998,37 @@ async saveCredentialsToFile(filePath, newData) {
         return error?.response?.headers?.['retry-after']
             || error?.response?.headers?.['Retry-After']
             || null;
+    }
+
+    _rotateProxySession(proxyUrl) {
+        const regex = /session-([a-zA-Z0-9_]+)-sessionduration/;
+        if (!regex.test(proxyUrl)) return null;
+        const chars = 'abcdefghijklmnopqrstuvwxyz';
+        let s = '';
+        for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+        return proxyUrl.replace(regex, `session-${s}-sessionduration`);
+    }
+
+    _tryRotateProxyAndRetryOn502(error, method, model, body, isRetry, retryCount, isStream = false) {
+        const status = error.response?.status;
+        if (status !== 502) return null;
+        const proxyUrl = this.config.ACCOUNT_PROXY_URL;
+        if (!proxyUrl || this.config.ACCOUNT_PROXY_DISABLED === true) return null;
+        const rotated = this._rotateProxySession(proxyUrl);
+        if (!rotated) return null;
+
+        this.config.ACCOUNT_PROXY_URL = rotated;
+        const pc = parseProxyUrl(rotated);
+        if (!pc) return null;
+
+        this.axiosInstance.defaults.httpAgent = pc.httpsAgent;
+        this.axiosInstance.defaults.httpsAgent = pc.httpsAgent;
+        logger.warn(`[Kiro][${this._nodeName}] 502 from proxy, rotated session: ${rotated.substring(rotated.indexOf('session-'), rotated.indexOf('-sessionduration') + 16)}`);
+
+        if (isStream) {
+            return this.streamApiReal(method, model, body, isRetry, retryCount + 1);
+        }
+        return this.callApi(method, model, body, isRetry, retryCount + 1);
     }
 
     _isRefreshableForbidden(error) {
@@ -2511,13 +2545,16 @@ async saveCredentialsToFile(filePath, newData) {
                 throw error;
             }
 
-            // Handle 5xx server errors - wait baseDelay then switch credential
+            // Handle 5xx server errors
             if (status >= 500 && status < 600) {
                 const bodyText = await this._readErrorResponseBody(error);
                 logger.warn(`[Kiro][${this._nodeName}] Received ${status} server error in stream. Body=${(bodyText || '').substring(0, 800)}`);
-                logger.info(`[Kiro][${this._nodeName}] Waiting ${baseDelay}ms before switching credential...`);
-                await new Promise(resolve => setTimeout(resolve, baseDelay));
-                // Mark error for credential switch without recording error count
+
+                if (status === 502 && retryCount < maxRetries) {
+                    const proxyRetry = this._tryRotateProxyAndRetryOn502(error, method, model, body, isRetry, retryCount, true);
+                    if (proxyRetry) { yield* proxyRetry; return; }
+                }
+
                 error.shouldSwitchCredential = true;
                 error.skipErrorCount = true;
                 throw error;
