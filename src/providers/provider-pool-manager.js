@@ -2386,7 +2386,7 @@ export class ProviderPoolManager {
     }
 
     _rotateProxySession(proxyUrl) {
-        const regex = /session-([a-zA-Z0-9]+)-sessionduration/;
+        const regex = /session-([a-zA-Z0-9_]+)-sessionduration/;
         if (!regex.test(proxyUrl)) {
             this._log('warn', '[ProxyGeoCheck] Proxy URL does not contain session pattern, cannot rotate');
             return null;
@@ -2425,7 +2425,7 @@ export class ProviderPoolManager {
             const pc = parseProxyUrl(url);
             if (!pc) return null;
             const resp = await axios.get('http://ip-api.com/json/?lang=zh-CN', {
-                httpAgent: pc.httpAgent,
+                httpAgent: pc.httpsAgent,
                 httpsAgent: pc.httpsAgent,
                 proxy: false,
                 timeout: 5000
