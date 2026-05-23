@@ -398,18 +398,6 @@ Notes:
 - `budget_tokens` is clamped to `[1024, 24576]` (default `20000` if omitted/invalid).
 - Token acquisition/refresh/pool rotation is unchanged.
 
-#### Kiro Web Tools (web_search / web_fetch)
-When the upstream client (Claude Code, Anthropic SDK, etc.) declares `web_search` / `web_fetch` tools, AIClient2API automatically maps them to Kiro's native `remote_web_search` / `web_fetch` tool specs so the tools actually work end-to-end instead of being filtered out.
-
-Two environment variables (also configurable via `configs/config.json`) control the behavior:
-
-| Variable | Type | Default | Description |
-|---|---|---|---|
-| `KIRO_REMOTE_WEB_SEARCH_ENABLED` | boolean | `true` | When `false`, falls back to filter-and-drop for any incoming `web_search` tool declaration |
-| `KIRO_WEB_FETCH_ENABLED` | boolean | `true` | When `false`, falls back to filter-and-drop for any incoming `web_fetch` tool declaration |
-
-Disable either switch as a one-second rollback if a Kiro spec drift breaks the mapping; the rest of the request path is unaffected.
-
 #### Codex OAuth Configuration
 1. **Generate Authorization**: On the Web UI "Provider Pools" or "Configuration" page, click the "Generate Authorization" button for Codex
 2. **Browser Login**: The system opens the OpenAI Codex authorization page to complete OAuth login
