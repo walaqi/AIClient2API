@@ -20,4 +20,5 @@ model-usage-stats.json
 AGENTS.md
 configs/pwd
 configs/model-prices.json
+configs/proxy_geo_rules.json
 

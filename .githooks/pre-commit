@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# Auto-bump the last segment of the version in VERSION + package.json
+# before each commit. See .githooks/README.md for setup and skip options.
+set -euo pipefail
+
+log() { echo "[pre-commit] $*" >&2; }
+
+if [ "${NO_BUMP:-}" = "1" ]; then
+  log "NO_BUMP=1, skipping version bump"
+  exit 0
+fi
+
+GIT_DIR="$(git rev-parse --git-dir)"
+
+if [ -f "$GIT_DIR/MERGE_HEAD" ] \
+   || [ -d "$GIT_DIR/rebase-merge" ] \
+   || [ -d "$GIT_DIR/rebase-apply" ] \
+   || [ -f "$GIT_DIR/CHERRY_PICK_HEAD" ]; then
+  log "merge/rebase/cherry-pick in progress, skipping version bump"
+  exit 0
+fi
+
+if [ -r "/proc/$PPID/comm" ] && [ -r "/proc/$PPID/cmdline" ]; then
+  parent_bin=$(tr -d '\n' < "/proc/$PPID/comm")
+  if [ "$parent_bin" = "git" ]; then
+    parent_cmd=$(tr '\0' ' ' < "/proc/$PPID/cmdline")
+    if [[ " $parent_cmd " == *" --amend "* ]]; then
+      log "amend detected, skipping version bump"
+      exit 0
+    fi
+  fi
+fi
+
+staged=$(git diff --cached --name-only --diff-filter=ACMRT)
+if [ -z "$staged" ]; then
+  exit 0
+fi
+non_md=$(echo "$staged" | grep -v -E '\.md$' || true)
+if [ -z "$non_md" ]; then
+  log "doc-only change, skipping version bump"
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+version_file="$repo_root/VERSION"
+pkg_file="$repo_root/package.json"
+
+if [ ! -f "$version_file" ]; then
+  log "VERSION file not found at $version_file" >&2
+  exit 1
+fi
+
+current=$(tr -d '[:space:]' < "$version_file")
+if [[ "$current" =~ ^(v?)([0-9]+(\.[0-9]+)*)\.([0-9]+)$ ]]; then
+  prefix="${BASH_REMATCH[1]}"
+  head_part="${BASH_REMATCH[2]}"
+  last="${BASH_REMATCH[4]}"
+  new_last=$((last + 1))
+  new_version="${prefix}${head_part}.${new_last}"
+else
+  log "cannot parse VERSION '$current' (expected like v1.2.3.4)" >&2
+  exit 1
+fi
+
+printf '%s\n' "$new_version" > "$version_file"
+
+# Update package.json's top-level "version": "..." field. Restrict the
+# substitution to the first 15 lines so we never touch nested fields.
+sed -i -E "1,15 s|(\"version\"[[:space:]]*:[[:space:]]*\")[^\"]+(\")|\1${new_version}\2|" "$pkg_file"
+
+# Sanity check: package.json now matches the new version
+if ! grep -qE "\"version\"[[:space:]]*:[[:space:]]*\"${new_version}\"" "$pkg_file"; then
+  log "failed to update package.json version field" >&2
+  exit 1
+fi
+
+git add "$version_file" "$pkg_file"
+log "bumped version: $current -> $new_version"
