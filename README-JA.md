@@ -398,6 +398,18 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
 - `budget_tokens` は `[1024, 24576]` の範囲に制限されます（省略または無効な場合はデフォルトの `20000` が適用されます）。
 - トークンの取得/リフレッシュ/プールローテーションメカニズムは変更されません。
 
+#### Kiro Web ツール（web_search / web_fetch）
+上流クライアント（Claude Code、Anthropic SDK など）が `web_search` / `web_fetch` ツールを宣言した場合、AIClient2API は自動的にこれらを Kiro ネイティブの `remote_web_search` / `web_fetch` ツール spec へマッピングします。これによりツールが実際にエンドツーエンドで動作し、フィルタリングで破棄されることを防ぎます。
+
+2 つの環境変数（`configs/config.json` 経由でも設定可）で動作を制御します：
+
+| 変数名 | 型 | デフォルト | 説明 |
+|---|---|---|---|
+| `KIRO_REMOTE_WEB_SEARCH_ENABLED` | ブール | `true` | `false` に設定すると、受信した `web_search` ツール宣言はフィルタリングで破棄されます |
+| `KIRO_WEB_FETCH_ENABLED` | ブール | `true` | `false` に設定すると、受信した `web_fetch` ツール宣言はフィルタリングで破棄されます |
+
+Kiro spec のドリフトでマッピングが壊れた場合、対応するスイッチを無効にすれば 1 秒でロールバックできます。リクエストパスの他の部分には影響しません。
+
 #### Codex OAuth設定
 1. **認証の生成**：Web UIの「プロバイダープール」または「設定管理」ページで、Codexの「認証生成」ボタンをクリック
 2. **ブラウザログイン**：システムがOpenAI Codex認証ページを開き、OAuthログインを完了

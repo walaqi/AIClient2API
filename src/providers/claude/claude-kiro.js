@@ -8,7 +8,10 @@ import * as os from 'os';
 import * as crypto from 'crypto';
 import * as http from 'http';
 import * as https from 'https';
+import { createRequire } from 'module';
 import { getProviderModels } from '../provider-models.js';
+
+const KIRO_TOOL_SPECS = createRequire(import.meta.url)('./kiro-tool-specs.json');
 import { 
     countTextTokens as countTextTokensUtil, 
     estimateInputTokens as estimateInputTokensUtil, 
@@ -1206,18 +1209,44 @@ async saveCredentialsToFile(filePath, newData) {
         const codewhispererModel = MODEL_MAPPING[model] || model;
         const toolNameMaps = buildKiroToolNameMaps(tools);
         
-        // 动态压缩 tools（保留全部工具，但过滤掉 web_search/websearch）
+        // 动态压缩 tools（保留全部工具，并把 web_search / web_fetch 映射到 Kiro 原生 schema）
         let toolsContext = {};
         if (tools && Array.isArray(tools) && tools.length > 0) {
-            // 过滤掉 web_search 或 websearch 工具（忽略大小写）
-            const filteredTools = tools.filter(tool => {
-                const name = (tool.name || '').toLowerCase();
-                const shouldIgnore = name === 'web_search' || name === 'websearch';
-                if (shouldIgnore) {
-                    logger.info(`[Kiro] Ignoring tool: ${tool.name}`);
+            const filteredTools = [];
+            for (const tool of tools) {
+                const lowerName = (tool.name || '').toLowerCase();
+                const lowerType = (tool.type || '').toLowerCase();
+
+                // 4 forms: web_search / websearch (lowercase name) + type:web_search / type:web_search_20250305
+                // all four forms have code-internal evidence (claude-kiro.js prior filter + Codex/ClaudeConverter)
+                const isWebSearch = lowerName === 'web_search' || lowerName === 'websearch'
+                    || lowerType === 'web_search' || lowerType === 'web_search_20250305';
+                if (isWebSearch) {
+                    if (this.config.KIRO_REMOTE_WEB_SEARCH_ENABLED === false) {
+                        logger.info(`[Kiro] Ignoring tool: ${tool.name || tool.type} (KIRO_REMOTE_WEB_SEARCH_ENABLED=false)`);
+                        continue;
+                    }
+                    logger.info(`[Kiro] Mapping ${tool.name || tool.type} → remote_web_search`);
+                    filteredTools.push(KIRO_TOOL_SPECS.remote_web_search);
+                    continue;
                 }
-                return !shouldIgnore;
-            });
+
+                // 4 forms: WebFetch (capture-confirmed), web_fetch / type:web_fetch / type:web_fetch_20250910
+                // (TODO: capture pending; trim unconfirmed forms during R5 verify before merge)
+                const isWebFetch = lowerName === 'web_fetch' || lowerName === 'webfetch'
+                    || lowerType === 'web_fetch' || lowerType === 'web_fetch_20250910';
+                if (isWebFetch) {
+                    if (this.config.KIRO_WEB_FETCH_ENABLED === false) {
+                        logger.info(`[Kiro] Ignoring tool: ${tool.name || tool.type} (KIRO_WEB_FETCH_ENABLED=false)`);
+                        continue;
+                    }
+                    logger.info(`[Kiro] Mapping ${tool.name || tool.type} → web_fetch`);
+                    filteredTools.push(KIRO_TOOL_SPECS.web_fetch);
+                    continue;
+                }
+
+                filteredTools.push(tool);
+            }
             
             if (filteredTools.length === 0) {
                 // 所有工具都被过滤掉了，添加一个占位工具

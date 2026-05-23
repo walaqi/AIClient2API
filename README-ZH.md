@@ -396,6 +396,18 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
 - `budget_tokens` 被限制在 `[1024, 24576]` 之间（如果省略或无效，默认值为 `20000`）。
 - Token 获取/刷新/池轮换机制保持不变。
 
+#### Kiro Web 工具（web_search / web_fetch）
+当上游客户端（Claude Code、Anthropic SDK 等）声明 `web_search` / `web_fetch` 工具时，AIClient2API 会自动把它们映射到 Kiro 原生的 `remote_web_search` / `web_fetch` 工具 spec，从而让工具真正可用，而不是被过滤丢弃。
+
+两个环境变量（也可通过 `configs/config.json` 配置）控制行为：
+
+| 变量名 | 类型 | 默认值 | 说明 |
+|---|---|---|---|
+| `KIRO_REMOTE_WEB_SEARCH_ENABLED` | 布尔 | `true` | 设为 `false` 时，对任何传入的 `web_search` 工具声明退回过滤丢弃 |
+| `KIRO_WEB_FETCH_ENABLED` | 布尔 | `true` | 设为 `false` 时，对任何传入的 `web_fetch` 工具声明退回过滤丢弃 |
+
+Kiro spec 漂移导致映射出错时，关闭对应开关即可一秒回退；请求路径其余部分不受影响。
+
 #### Codex OAuth 配置
 1. **生成授权**：在 Web UI 的"提供商池"或"配置管理"页面，点击 Codex 的"生成授权"按钮
 2. **浏览器登录**：系统将打开 OpenAI Codex 授权页面，完成 OAuth 登录
