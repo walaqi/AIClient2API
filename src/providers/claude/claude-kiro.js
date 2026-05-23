@@ -21,6 +21,7 @@ import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog } from '../../
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { calculateCacheTokens } from '../../utils/model-pricing.js';
 import { parseAwsEventStreamFrames as awsParseEventStreamFrames } from './aws-event-stream-parser.js';
+import { isIncompleteFileToolCall } from './kiro-tool-validators.js';
 
 const KIRO_THINKING = {
     MIN_BUDGET_TOKENS: 1024,
@@ -393,13 +394,6 @@ function repairToolInputJson(inputStr) {
     const repaired = inputStr.replace(/\}(,\s*")/, '$1');
     try { JSON.parse(repaired); return repaired; } catch (e) {}
     return inputStr;
-}
-
-function isIncompleteFileToolCall(toolName, parsedInput) {
-    if (typeof parsedInput !== 'object' || parsedInput === null) return false;
-    const name = String(toolName || '');
-    if (!(name.includes('Write') || name.includes('Edit') || name.includes('write') || name.includes('create_text_file'))) return false;
-    return parsedInput.file_path && !parsedInput.content;
 }
 
 function getOutputReserveConfig(config) {
