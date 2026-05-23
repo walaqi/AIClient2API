@@ -3,6 +3,70 @@ import { promises as pfs } from 'fs';
 import { INPUT_SYSTEM_PROMPT_FILE } from '../utils/common.js';
 import { MODEL_PROVIDER } from '../utils/constants.js';
 import logger from '../utils/logger.js';
+import { atomicWriteFile } from '../utils/file-lock.js';
+
+const PROXY_GEO_RULES_PATH = 'configs/proxy_geo_rules.json';
+
+function sanitizeProxyGeoRules(rules, source) {
+    if (!Array.isArray(rules)) {
+        logger.warn(`[Config] ${source} did not contain an array of proxy geo rules; ignoring`);
+        return [];
+    }
+    const valid = [];
+    for (const rule of rules) {
+        if (rule && typeof rule.country === 'string' && rule.country.trim()
+            && typeof rule.city === 'string' && rule.city.trim()) {
+            valid.push({ country: rule.country, city: rule.city });
+        } else {
+            logger.warn(`[Config] Skipping invalid proxy geo rule in ${source}: ${JSON.stringify(rule)}`);
+        }
+    }
+    return valid;
+}
+
+async function loadOrMigrateProxyGeoRules(currentConfig, configFilePath) {
+    if (fs.existsSync(PROXY_GEO_RULES_PATH)) {
+        try {
+            const raw = await pfs.readFile(PROXY_GEO_RULES_PATH, 'utf8');
+            const parsed = JSON.parse(raw);
+            const rules = sanitizeProxyGeoRules(parsed, PROXY_GEO_RULES_PATH);
+            currentConfig.PROXY_GEO_VALIDATE_RULES = rules;
+            logger.info(`[Config] Loaded ${rules.length} proxy geo validate rule(s) from ${PROXY_GEO_RULES_PATH}`);
+        } catch (error) {
+            logger.error(`[Config Error] Failed to load ${PROXY_GEO_RULES_PATH}: ${error.message}`);
+            currentConfig.PROXY_GEO_VALIDATE_RULES = [];
+        }
+        return;
+    }
+
+    const legacyRules = currentConfig.PROXY_GEO_VALIDATE_RULES;
+    if (Array.isArray(legacyRules) && legacyRules.length > 0) {
+        const sanitized = sanitizeProxyGeoRules(legacyRules, configFilePath);
+        try {
+            await atomicWriteFile(PROXY_GEO_RULES_PATH, JSON.stringify(sanitized, null, 2), 'utf-8');
+        } catch (error) {
+            logger.error(`[Config Error] Failed to write ${PROXY_GEO_RULES_PATH} during migration: ${error.message}`);
+            currentConfig.PROXY_GEO_VALIDATE_RULES = sanitized;
+            return;
+        }
+        try {
+            const rawConfig = await pfs.readFile(configFilePath, 'utf8');
+            const parsed = JSON.parse(rawConfig);
+            if (Object.prototype.hasOwnProperty.call(parsed, 'PROXY_GEO_VALIDATE_RULES')) {
+                delete parsed.PROXY_GEO_VALIDATE_RULES;
+                await atomicWriteFile(configFilePath, JSON.stringify(parsed, null, 2), 'utf-8');
+            }
+            logger.info(`[Config] Migrated PROXY_GEO_VALIDATE_RULES from ${configFilePath} to ${PROXY_GEO_RULES_PATH}`);
+        } catch (error) {
+            logger.error(`[Config Error] Migrated rules to ${PROXY_GEO_RULES_PATH} but failed to clean up ${configFilePath}: ${error.message}`);
+        }
+        currentConfig.PROXY_GEO_VALIDATE_RULES = sanitized;
+        return;
+    }
+
+    currentConfig.PROXY_GEO_VALIDATE_RULES = [];
+    logger.info('[Config] No proxy geo validate rules configured');
+}
 
 export let CONFIG = {}; // Make CONFIG exportable
 export let PROMPT_LOG_FILENAME = ''; // Make PROMPT_LOG_FILENAME exportable
@@ -249,6 +313,8 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         logger.error(`[Config Error] Failed to load custom models from ${currentConfig.CUSTOM_MODELS_FILE_PATH}: ${error.message}`);
         currentConfig.customModels = [];
     }
+
+    await loadOrMigrateProxyGeoRules(currentConfig, configFilePath);
 
     // Set PROMPT_LOG_FILENAME based on the determined config
     if (currentConfig.PROMPT_LOG_MODE === 'file') {

@@ -317,6 +317,7 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
             const configPath = 'configs/config.json';
             
             // Create a clean config object for saving (exclude runtime-only properties)
+            // 注意：新增 defaultConfig 字段时必须同步更新此白名单，否则 UI 保存会从 config.json 抹掉该字段
             const configToSave = {
                 REQUIRED_API_KEY: currentConfig.REQUIRED_API_KEY,
                 SERVER_PORT: currentConfig.SERVER_PORT,
@@ -337,7 +338,11 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
                 CRON_NEAR_MINUTES: currentConfig.CRON_NEAR_MINUTES,
                 CRON_REFRESH_TOKEN: currentConfig.CRON_REFRESH_TOKEN,
                 LOGIN_EXPIRY: currentConfig.LOGIN_EXPIRY,
+                LOGIN_MAX_ATTEMPTS: currentConfig.LOGIN_MAX_ATTEMPTS,
+                LOGIN_LOCKOUT_DURATION: currentConfig.LOGIN_LOCKOUT_DURATION,
+                LOGIN_MIN_INTERVAL: currentConfig.LOGIN_MIN_INTERVAL,
                 PROVIDER_POOLS_FILE_PATH: currentConfig.PROVIDER_POOLS_FILE_PATH,
+                CUSTOM_MODELS_FILE_PATH: currentConfig.CUSTOM_MODELS_FILE_PATH,
                 MAX_ERROR_COUNT: currentConfig.MAX_ERROR_COUNT,
                 WARMUP_TARGET: currentConfig.WARMUP_TARGET,
                 REFRESH_CONCURRENCY_PER_PROVIDER: currentConfig.REFRESH_CONCURRENCY_PER_PROVIDER,
@@ -356,8 +361,18 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
                 TLS_SIDECAR_ENABLED: currentConfig.TLS_SIDECAR_ENABLED,
                 TLS_SIDECAR_ENABLED_PROVIDERS: currentConfig.TLS_SIDECAR_ENABLED_PROVIDERS,
                 TLS_SIDECAR_PORT: currentConfig.TLS_SIDECAR_PORT,
+                TLS_SIDECAR_BINARY_PATH: currentConfig.TLS_SIDECAR_BINARY_PATH,
                 TLS_SIDECAR_PROXY_URL: currentConfig.TLS_SIDECAR_PROXY_URL,
-                SCHEDULED_HEALTH_CHECK: currentConfig.SCHEDULED_HEALTH_CHECK
+                SCHEDULED_HEALTH_CHECK: currentConfig.SCHEDULED_HEALTH_CHECK,
+                UI_ENABLED: currentConfig.UI_ENABLED,
+                GROK_COOKIE_TOKEN: currentConfig.GROK_COOKIE_TOKEN,
+                GROK_CF_CLEARANCE: currentConfig.GROK_CF_CLEARANCE,
+                GROK_USER_AGENT: currentConfig.GROK_USER_AGENT,
+                GROK_BASE_URL: currentConfig.GROK_BASE_URL,
+                OUTPUT_RESERVE_CONTEXT_PRESSURE: currentConfig.OUTPUT_RESERVE_CONTEXT_PRESSURE,
+                OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE: currentConfig.OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE,
+                OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS: currentConfig.OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS,
+                OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE: currentConfig.OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE
             };
 
             await atomicWriteFile(configPath, JSON.stringify(configToSave, null, 2), { encoding: 'utf-8', mode: 0o600 });
