@@ -67,6 +67,8 @@ export function parseAwsEventStreamFrames(buf) {
 
 function emitEventFromParsed(parsed, events) {
     // TODO: 未来应改用 :event-type header 做分发，比 payload shape 启发式更权威
+    // 兼容 Kiro 0.12 的 wrapped 形态: {"assistantResponseEvent":{...}} / {"toolUseEvent":{...}} / {"reasoningContentEvent":{...}}
+    parsed = parsed.assistantResponseEvent || parsed.toolUseEvent || parsed.reasoningContentEvent || parsed;
     if (parsed.content !== undefined && !parsed.followupPrompt) {
         events.push({ type: 'content', data: parsed.content });
     } else if (typeof parsed.text === 'string' && !parsed.name && !parsed.toolUseId && parsed.content === undefined) {

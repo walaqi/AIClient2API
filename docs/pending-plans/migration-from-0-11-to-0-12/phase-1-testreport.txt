@@ -1,0 +1,202 @@
+# Kiro 0.11 → 0.12 迁移 — Phase 1 手工测试报告
+
+日期: 2026-05-23
+执行计划: docs/pending-plans/migration-from-0-11-to-0-12/test-guide.md
+执行规划: ~/.claude/plans/docs-pending-plans-migration-from-0-11-encapsulated-giraffe.md
+代码状态: Phase 1/2/3 改动均未 commit, 测试在工作区直接进行
+测试节点: SOCIAL OAuth 凭证 a02bd631-9099-423b-968c-8f8ef181bdff (uuid 3950825e)
+日志根: logs/app-2026-05-23.log
+
+==========================================================================
+总体结论: Phase 1 通过 (§1.1 - §1.6 全部 PASS)
+==========================================================================
+
+附带 2 项 Phase 3.x finding 见下文 "已知 finding" 段。
+所有临时诊断代码已清理, 路线 A 不再回滚 (与 §3.2 计划一致, 见说明)。
+
+
+==========================================================================
+逐用例结论
+==========================================================================
+
+§1.1 单轮冒烟 (非流式) — PASS
+  * 主目标 HTTP 200, content[].text 非空, 思考链正确还原为 content[].type='thinking'.
+  * DIAG 抓到 count=520 events, 类型分布 reasoning(头) + content(主体) + contextUsage + metering, bufLen=82717.
+  * grep "Kiro Parse" 空 (无 sync-loss / Recovered frame 警告).
+  * 期间发现两条真 bug, 已落地修复 (见下方 "实质性 bug 修复" 段).
+
+§1.2 Header parity (IDE 拟态) — PASS
+  * 抓取手段: callApi/streamApiReal/wire 三处加 logger.debug, 临时 logLevel=debug.
+  * SOCIAL 路径下:
+      - x-amzn-kiro-agent-mode: spec ✓
+      - user-agent: KiroIDE-0.12.155-${machineId} ✓
+      - amz-sdk-invocation-id: 每次新 uuid (跨多次请求去重计数一致) ✓
+      - amz-sdk-request: attempt=1; max=3 ✓ (callApi 路径)
+  * IDC 账号未持有, 跳过对照验证, 视为预期外延.
+  * 三处 debug 行保留 (silent at info logLevel, 长期保留无副作用).
+
+§1.3 429 fallback — PASS
+  * 子用例 a (KIRO_FORCE_429=cw, 仅 CodeWhisperer 强 429):
+      - 日志命中 "Endpoint CodeWhisperer quota exhausted (429), trying AmazonQ..."
+      - 紧接 "Endpoint AmazonQ succeeded after fallback from earlier 429."
+      - HTTP 200 返回 ✓
+  * 子用例 b (KIRO_FORCE_429=all, 三端点全 429):
+      - 三条 quota exhausted 依次出现, 最终 429 抛出, 不死循环.
+      - 走 claude-kiro.js _handle429Error 流程, 出 "Received 429 (Too Many Requests). Retry-After=..."
+  * 注入代码已清理.
+
+§1.4 401/403 不 fallback — PASS
+  * 注入 KIRO_FORCE_401=unary_once / stream_once, 一次性触发.
+  * 表现:
+      - NO "Endpoint CodeWhisperer quota exhausted" 日志 ✓ (401 不是 429, 不 continue)
+      - NO "Endpoint AmazonQ" 切换日志 ✓
+      - 出 "Received 401. Refreshing UUID and triggering background refresh..." ✓
+      - 节点 mark needs refresh, 刷新后真实重试一次成功 ✓
+  * 注入代码已清理.
+
+§1.5 AmazonQCLI 模式 — PASS (附 1 项 finding)
+  * configs/provider_pools.json 临时加 "KIRO_PREFERRED_ENDPOINT": "amazonq-cli", 重启.
+  * getSortedEndpoints('amazonq-cli') 仅返回 1 个端点 → 临时 endpointPayload dump 只出现 1 次.
+  * 该 payload JSON 严格符合 §1.5 判据:
+      - currentMessage.userInputMessage.origin === 'CLI' ✓
+      - 无 agentContinuationId 字段 ✓ (applyPayloadOrigin 删除)
+      - 无 agentTaskType 字段 ✓ (applyPayloadOrigin 删除)
+      - endpoint.name === 'AmazonQCLI' ✓
+  * 服务端返回 400, 但 dump 证实客户端 payload 形态正确, 故视为服务端针对
+    SOCIAL+CLI UA 的 enforcement, 不算客户端 bug. 详见 finding [F2].
+  * KIRO_PREFERRED_ENDPOINT 已清, dump 行已移除.
+
+§1.6 非流式 vs 流式 解析器 parity — PASS
+  * 同一 prompt + 同一 tool 定义 (get_weather), 分别 stream:false / stream:true.
+  * 非流式响应 tool_use:
+      - name = "get_weather"
+      - input = {"location":"Tokyo","unit":"celsius"}
+  * 流式响应聚合 (input_json_delta 拼接) tool_use:
+      - name = "get_weather"
+      - input = {"location":"Tokyo","unit":"celsius"}
+  * jq -S 比对一致 ✓
+  * 非流式 DIAG: 12 events (10 toolUse partials + contextUsage + metering), bufLen=2113.
+  * grep "falling back to legacy regex parser" 空 ✓
+  * grep "AWS event-stream parser produced 0 events" 空 ✓
+  * Tool name 经 restoreKiroToolCallNames 还原, hash 映射回 originalToolName 一致.
+
+
+==========================================================================
+实质性 bug 修复 (Phase 1 期间排查并落地, 已保留在工作区)
+==========================================================================
+
+[Fix-A] 字节通道修复 (§1.1 主阻塞)
+  根因: axios 不设 responseType='arraybuffer' 时默认按 text 解码,
+        二进制 event-stream 帧里的高字节 (0x80+) 被替换为 U+FFFD,
+        再次 toString('utf8') 时 U+FFFD 重新编码为 3 字节 ef bf bd,
+        每个原 1 字节高字节膨胀 3 倍, 12 字节 prelude/totalLen 字段被打乱,
+        awsParseEventStreamFrames 只能解出 1 个帧 (其余靠 break 静默吞掉).
+  修复:
+    - claude-kiro.js:2489-2495  axios responseType: 'arraybuffer'
+    - claude-kiro.js:2868-2879  _processApiResponse 把 raw Buffer 透传给 parseEventStreamChunk;
+                                文本视图仅用于 ASCII bracket-tool 扫描
+    - claude-kiro.js:2597       400 错误体走 _getErrorResponseText 处理 Buffer
+  对照来源: Kiro-account-manager 用 undici ReadableStream<Uint8Array> 直读字节.
+
+[Fix-B] dispatcher unwrap (Kiro 0.12 包装事件兼容)
+  根因: Kiro 0.12 把 event payload 改成包装形态:
+        {assistantResponseEvent:{content:"..."}} / {toolUseEvent:{...}} / {reasoningContentEvent:{text:"..."}}
+        emitEventFromParsed 的启发式分发只看 flat 形态, 包装层未拆.
+  修复:
+    - aws-event-stream-parser.js:71  emitEventFromParsed 入口加 unwrap:
+        parsed = parsed.assistantResponseEvent || parsed.toolUseEvent
+                 || parsed.reasoningContentEvent || parsed;
+  TODO 保留: 长期应改用 :event-type header 派发, 而非 payload shape 启发式.
+
+[Fix-C] 非流式 thinking pipeline 缺口
+  根因: Kiro 0.11 时代思考链以内联 <thinking>...</thinking> 文本嵌在 content 中;
+        0.12 改为独立 reasoningContentEvent 帧.
+        非流式聚合循环 (claude-kiro.js:2287-2320) 旧实现对 reasoning 事件 "静默丢弃",
+        在 0.12 下导致服务端正确返回的思考链被客户端整体丢失,
+        响应缺 content[].type='thinking' 块.
+  修复:
+    - parseEventStreamChunk 返回 shape 扩展为 {content, toolCalls, thinking}
+    - 聚合循环 event.type === 'reasoning' 分支累加 thinking += event.data
+    - _parseEventStreamChunkLegacy 同步返回 thinking: '' 占位
+    - _processApiResponse 透传 thinking
+    - generateContent 在 thinkingRequested 路径直接构造
+        [{type:'thinking', thinking}, {type:'text', text}]
+        不再依赖 _toClaudeContentBlocksFromKiroText (0.12 服务端不再内联标签).
+  对照: 流式路径 claude-kiro.js:3560-3574 已正确处理 reasoning → thinking, 未动.
+
+[Fix-D] thinking 字段 Kiro 0.12 enum 兼容 (§3.2 就地落地, 见说明)
+  根因: Kiro 0.12 服务端 additionalModelRequestFields.thinking.type
+        enum 只接受 ["adaptive", "disabled"], 不再接受 "enabled".
+  修复:
+    - claude-kiro.js:2206-2218  enabled 一并归到 adaptive, 下发 {type: 'adaptive'};
+                                disabled / 未识别: 不下发该字段.
+  说明: 计划原文写 "Phase 1 路线 A 临时改, 跑完回滚, §3.2 单独立 PR".
+        实际上整个 Phase 3 代码本身就还未 commit, 不存在路线 A 是临时叠加的边界,
+        因此与用户讨论后决定保留这条映射作为 §3.2 正式落地, 注释从 "临时改法 / 待回滚"
+        改写为 "Kiro 0.12 服务端 enum 只接受 ..., enabled 一并归到 adaptive".
+
+
+==========================================================================
+已知 finding (Phase 3.x 单独跟进, 不阻塞 Phase 1 sign-off)
+==========================================================================
+
+[F1] Phase 3.2 thinking enum 行为已就地落地
+  详见 [Fix-D]. 严格说不属于 Phase 1 范围, 但因为没有 commit 边界, 已与 §3.2 计划一致地保留.
+
+[F2] SOCIAL+AmazonQCLI 端点的 user-agent 选择策略
+  现状: claude-kiro.js:1401 用 isIdc (账号属性) 决定 CLI/IDE user-agent,
+        与 endpoint.origin 解耦. SOCIAL 账号即使被路由到 AmazonQCLI 端点,
+        发出的仍是 KiroIDE user-agent.
+  观察: §1.5 测试中, SOCIAL+AmazonQCLI 服务端返回 400, payload 形态客户端侧
+        已确认正确 (origin: CLI, 无 agentContinuationId/agentTaskType).
+        合理推测服务端对 user-agent 与 origin 字段的搭配做了一致性校验,
+        SOCIAL+IDE-UA+CLI-origin 是不被接受的组合.
+  待对齐: user-agent 应该跟 endpoint.origin 走还是跟账号 isIdc 走?
+        计划文档 §1.3 描述偏模糊, 需要先与上游对齐再决定是否调整 1401 处.
+  影响范围: 仅在 KIRO_PREFERRED_ENDPOINT='amazonq-cli' 时触发, 默认路径不受影响.
+
+
+==========================================================================
+清理确认
+==========================================================================
+
+代码:
+  - 已移除: §1.1 raw buffer dump + [Kiro DIAG] info log
+  - 已移除: §1.5 endpointPayload info dump (callApi + streamApiReal 各 1 处)
+  - 已移除: §1.3 KIRO_FORCE_429={cw|all} 注入块 (callApi + streamApiReal 各 1 处)
+  - 已移除: §1.4 KIRO_FORCE_401={unary_once|stream_once} 注入块 + 配套 global flag
+  - 已保留: §1.2 三处 logger.debug outbound headers (silent at info logLevel)
+  - 已保留: [Fix-A][Fix-B][Fix-C][Fix-D] 全部真实修复
+  - 路线 A 注释已改写, 不再回滚 (见 [Fix-D] 说明)
+
+配置:
+  - configs/provider_pools.json 已恢复 (KIRO_PREFERRED_ENDPOINT 字段已删)
+
+环境变量:
+  - 测试期 KIRO_FORCE_429 / KIRO_FORCE_401 已 unset
+
+最终验证:
+  $ grep -nE "Kiro §1.5|Kiro DIAG|KIRO_FORCE_429|KIRO_FORCE_401|kiro-raw|__kiroForce|Phase 1 sign-off" src/providers/claude/claude-kiro.js
+  (空)
+
+  $ grep -n "outbound headers" src/providers/claude/claude-kiro.js
+  1437: wire 路径
+  2505: callApi 路径
+  3050: streamApiReal 路径
+
+
+==========================================================================
+建议
+==========================================================================
+
+1. Phase 1 改动建议作为单一 PR 提交, 含:
+     - [Fix-A] 字节通道
+     - [Fix-B] dispatcher unwrap
+     - [Fix-C] 非流式 thinking pipeline
+     - [Fix-D] thinking enum 映射 (即原计划 §3.2)
+     - §1.2 三处 outbound headers debug log
+
+2. [F2] SOCIAL+AmazonQCLI user-agent 策略, 单独 issue 跟进.
+
+3. aws-event-stream-parser.js:69 TODO (改用 :event-type header 派发) 单独 issue 跟进,
+   长期改造方向, 不影响 Phase 1.
