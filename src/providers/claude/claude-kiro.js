@@ -89,6 +89,7 @@ function buildKiroToolNameMaps(tools) {
 
     return {
         aliasToOriginal,
+        originalToAlias,
         toKiroName: (name) => originalToAlias.get(name) || shortenKiroToolName(name),
         fromKiroName: (name) => aliasToOriginal.get(name) || name
     };
@@ -1228,6 +1229,13 @@ async saveCredentialsToFile(filePath, newData) {
                     }
                     logger.info(`[Kiro] Mapping ${tool.name || tool.type} → remote_web_search`);
                     filteredTools.push(KIRO_TOOL_SPECS.remote_web_search);
+                    // 双向别名:历史轮 tool_use 用客户端原名,需要 toKiroName 映射成 remote_web_search;
+                    // Kiro 响应里的 remote_web_search 需要 fromKiroName 还原回客户端原名,否则下游报 No such tool。
+                    const clientName = tool.name || tool.type;
+                    if (clientName && clientName !== 'remote_web_search') {
+                        toolNameMaps.originalToAlias.set(clientName, 'remote_web_search');
+                        toolNameMaps.aliasToOriginal.set('remote_web_search', clientName);
+                    }
                     continue;
                 }
 
@@ -1242,6 +1250,11 @@ async saveCredentialsToFile(filePath, newData) {
                     }
                     logger.info(`[Kiro] Mapping ${tool.name || tool.type} → web_fetch`);
                     filteredTools.push(KIRO_TOOL_SPECS.web_fetch);
+                    const clientName = tool.name || tool.type;
+                    if (clientName && clientName !== 'web_fetch') {
+                        toolNameMaps.originalToAlias.set(clientName, 'web_fetch');
+                        toolNameMaps.aliasToOriginal.set('web_fetch', clientName);
+                    }
                     continue;
                 }
 
