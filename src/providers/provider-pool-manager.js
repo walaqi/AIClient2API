@@ -2454,7 +2454,8 @@ export class ProviderPoolManager {
         }
 
         // Retry with rotated sessions
-        for (let i = 0; i < 5; i++) {
+        // 将rotation count 提升到20次
+        for (let i = 0; i < 20; i++) {
             const rotatedUrl = this._rotateProxySession(currentUrl);
             if (!rotatedUrl) {
                 return { success: false, errorMessage: `[ProxyGeoCheck] Cannot rotate proxy session - no session pattern in URL` };
