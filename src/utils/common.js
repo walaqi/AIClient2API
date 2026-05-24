@@ -1478,6 +1478,19 @@ export async function handleContentGenerationRequest(req, res, service, endpoint
         processedRequestBody.endpoint = requestPath;
     }
 
+    // 将 Claude Code 的 x-claude-code-session-id header 注入到 metadata.session_id,
+    // 让 Kiro buildCodewhispererRequest 的 sessionHint → conversationId 复用链路能命中
+    // (参考 claude-kiro.js:1869). 放在跨协议转换之后, 确保 OpenAI/Gemini→Claude/Kiro
+    // 等场景下注入的字段不会被转换器丢掉.
+    // 优先级: body 显式 metadata.session_id > header > history fingerprint.
+    const claudeCodeSessionId = req.headers && req.headers['x-claude-code-session-id'];
+    if (claudeCodeSessionId && typeof claudeCodeSessionId === 'string') {
+        processedRequestBody.metadata = processedRequestBody.metadata || {};
+        if (!processedRequestBody.metadata.session_id) {
+            processedRequestBody.metadata.session_id = claudeCodeSessionId;
+        }
+    }
+
     // 3. Apply system prompt from file if configured.
     processedRequestBody = await _applySystemPromptFromFile(CONFIG, processedRequestBody, toProvider);
     await _manageSystemPrompt(processedRequestBody, toProvider);
