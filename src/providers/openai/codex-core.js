@@ -365,7 +365,7 @@ export class CodexApiService {
 
         // 明确会话维度：优先使用 session_id 或 conversation_id，其次 user_id
         const sessionId = metadata.session_id || metadata.conversation_id || metadata.user_id || 'default';
-
+        logger.info('[SESSION DIAG]:'+sessionId)
         // 判断是否为 fast 模型并确定默认值
         const normalizedModel = String(model || '').trim();
         const isFastModel = /-fast$/i.test(normalizedModel);
