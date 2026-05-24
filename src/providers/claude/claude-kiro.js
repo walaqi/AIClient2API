@@ -1869,7 +1869,6 @@ async saveCredentialsToFile(filePath, newData) {
         // sessionHint 优先级: 显式 metadata.session_id > metadata.conversation_id > history fingerprint.
         const sessionHint = (this._currentRequestMetadata && (this._currentRequestMetadata.session_id || this._currentRequestMetadata.conversation_id)) || undefined;
         const conversationId = resolveConversationId(messages, sessionHint);
-        logger.info(`[Kiro][SessionHint][TEMP] sessionHint=${sessionHint} conversationId=${conversationId}`);
         
         // 内置的 systemPrompt 前缀
         // const builtInPrefix = `<CRITICAL_OVERRIDE>
