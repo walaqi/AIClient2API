@@ -1,6 +1,6 @@
 {
   "name": "aiclient2api",
-  "version": "v3.0.9.14",
+  "version": "v3.0.9.15",
   "type": "module",
   "dependencies": {
     "@ai-sdk/openai": "^3.0.61",

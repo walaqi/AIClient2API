@@ -22,6 +22,11 @@ fixtureSuite('pure-text', 'pure-text.bin', (events) => {
     const types = new Set(events.map(e => e.type));
     expect(types.has('content')).toBe(true);
     expect(types.has('metering')).toBe(true);
+    // [F3]: 非流式聚合路径与流式同源, 都依赖 contextUsage 事件推导 inputTokens
+    const ctx = events.filter(e => e.type === 'contextUsage');
+    expect(ctx.length).toBeGreaterThanOrEqual(1);
+    expect(typeof ctx[0].data.contextUsagePercentage).toBe('number');
+    expect(ctx[0].data.contextUsagePercentage).toBeGreaterThan(0);
 });
 
 fixtureSuite('reasoning-text', 'reasoning-text.bin', (events) => {
@@ -39,4 +44,8 @@ fixtureSuite('multi-tool', 'multi-tool.bin', (events) => {
     const toolUses = events.filter(e => e.type === 'toolUse');
     expect(toolUses.length).toBeGreaterThanOrEqual(2);
     expect(events.length).toBeGreaterThan(toolUses.length * 2);
+    // [F3]: 非流式 cache 反算依赖 metering + contextUsage 同时存在
+    const types = new Set(events.map(e => e.type));
+    expect(types.has('metering')).toBe(true);
+    expect(types.has('contextUsage')).toBe(true);
 });

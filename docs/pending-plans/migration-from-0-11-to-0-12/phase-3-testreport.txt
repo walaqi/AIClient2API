@@ -398,3 +398,57 @@
    留给提交方决策. 三者目前都还未 commit, 测试报告与代码一一对应,
    建议至少 Phase 3 与 Phase 2 合并 (Fix-F 依赖 Phase 2 的非流式聚合
    形态), Phase 1 已 commit (7a36fe5) 不在合并讨论范围.
+
+
+==========================================================================
+[F3] 收尾 — 非流式 cache 反算口径统一 + IDC 对照测 recipe
+==========================================================================
+
+(b) 已落地: parseEventStreamChunk / _parseEventStreamChunkLegacy /
+    _processApiResponse / generateContent 四处改动, 让非流式路径与流式
+    同样从 contextUsage 事件取 contextUsagePercentage, 走
+    `totalCtx*pct/100 - outputTokens` 推 inputTokens, 缺失时回落到
+    estimateInputTokens.
+    - claude-kiro.js:2264 / 2335+ / 2363   parseEventStreamChunk 抓字段
+    - claude-kiro.js:2463                  legacy 回退结构补字段
+    - claude-kiro.js:2907 / 2942           _processApiResponse 透传
+    - claude-kiro.js:2966-3015             generateContent 同流式公式
+
+    口径统一后, §3.6 非流式子用例 inputTokens 应与流式路径接近 (1447 ±
+    抖动), 而非本期实测的 2862. cache_read / cache_creation 的反算结果
+    在两条路径间可直接对比.
+
+    新增单测: tests/providers/claude-kiro-parser-fixture.test.js 在
+    pure-text / multi-tool fixture 上断言 contextUsage 事件存在且
+    contextUsagePercentage 是合理正数, 锁住非流式聚合路径所依赖的上游
+    信号 (parseEventStreamChunk 的 else-if 分支只是把这一信号累加成
+    返回字段, 由代码审阅 + 端到端实跑共同覆盖).
+    (备注: 不直接 import KiroApiService 起 in-process unit, 是因为它
+    的依赖链经 service-manager → adapter → gemini-core 触发 ESM-only
+    依赖 `open` 在 babel-jest CJS 转译下解析失败; 与 [F3] 主线无关,
+    留作既有 tooling 议题。)
+
+(a) IDC 对照测 recipe (本期未执行, 缺 IDC 凭证):
+    1. 准备 IDC 凭证, 写入 configs/auth-credentials.json (authMethod=
+       'idc'), 同时 KIRO_PREFERRED_ENDPOINT 保持 'codewhisperer' 与本期
+       SOCIAL 跑同 endpoint.
+    2. 跑 §3.6 同 fixture (/tmp/phase3-3.6-stream-A.json /
+       /tmp/phase3-3.6-stream-B.json + non-stream 对应) 各两次, 观察
+       DIAG / response.usage:
+       - cacheReadTokens 在第二次是否显著>0 (上游真命中?)
+       - meteringCredits 第二次是否显著低于第一次 (上游计费侧的 cache
+         折扣?)
+    3. 对照 SOCIAL 本期数据 (stream credits=0.03117/0.03218,
+       cache_read=0; non-stream credits=0.03127/0.03227, cache_read 是
+       反算工件) 判定: IDC 是否真engage Anthropic prompt cache.
+    4. 同时跑 KIRO_PREFERRED_ENDPOINT='amazonq' 第二组对照, 判定 endpoint
+       本身是否影响 cache 行为.
+    若 IDC 与 SOCIAL 行为一致 → 上游 SendMessage 在该 codepath 上整体不
+    engage cache, 客户端侧已无优化空间, 改记入 known limitation.
+    若 IDC 命中而 SOCIAL 不命中 → SOCIAL/Builder-ID 端点的已知差异, 单
+    开 issue 跟踪.
+
+(c) 已知遗留 (不在本期 scope):
+    model-pricing.js:144-160 注释点明的"反算公式缺 regular_input 第三类"
+    简化假设. 公式重写需要先验信息或上游显式字段, 影响所有 provider, 留
+    作单独 issue.

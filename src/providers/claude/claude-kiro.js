@@ -2262,6 +2262,7 @@ async saveCredentialsToFile(filePath, newData) {
         let fullContent = '';
         let thinking = '';
         let meteringCredits = null;
+        let contextUsagePercentage = null;
         const toolCalls = [];
         let currentToolCallDict = null;
 
@@ -2332,8 +2333,12 @@ async saveCredentialsToFile(filePath, newData) {
                 // Kiro 0.12 metering.usage 是 credit 数 (number, 非 token 对象)。非流式聚合路径
                 // 与流式路径保持一致: 累加 credit, 由 calculateCacheTokens 反算 cache_read / cache_creation。
                 meteringCredits = (meteringCredits || 0) + event.data.usage;
+            } else if (event.type === 'contextUsage' && event.data &&
+                       typeof event.data.contextUsagePercentage === 'number') {
+                // 非流式路径与流式同口径: 用上游 contextUsagePercentage 推 inputTokens,
+                // 避免 estimateInputTokens 本地估算与 metering 反算 cache_read 不可比 ([F3])。
+                contextUsagePercentage = event.data.contextUsagePercentage;
             }
-            // contextUsage: 非流式聚合路径仍然丢弃 (Phase 3.x 单独处理)
         }
 
         // 流末尾仍有未关闭的工具调用 (服务端漏发 stop)
@@ -2355,7 +2360,7 @@ async saveCredentialsToFile(filePath, newData) {
         }
 
         const uniqueToolCalls = restoreKiroToolCallNames(deduplicateToolCalls(toolCalls), toolNameMaps);
-        return { content: fullContent || '', toolCalls: uniqueToolCalls, thinking, meteringCredits };
+        return { content: fullContent || '', toolCalls: uniqueToolCalls, thinking, meteringCredits, contextUsagePercentage };
     }
 
     _parseEventStreamChunkLegacy(rawStr, toolNameMaps = null) {
@@ -2455,7 +2460,7 @@ async saveCredentialsToFile(filePath, newData) {
         }
 
         const uniqueToolCalls = restoreKiroToolCallNames(deduplicateToolCalls(toolCalls), toolNameMaps);
-        return { content: fullContent || '', toolCalls: uniqueToolCalls, thinking: '', meteringCredits: null };
+        return { content: fullContent || '', toolCalls: uniqueToolCalls, thinking: '', meteringCredits: null, contextUsagePercentage: null };
     }
 
 
@@ -2900,6 +2905,7 @@ async saveCredentialsToFile(filePath, newData) {
         let allToolCalls = [...parsedFromEvents.toolCalls]; // clone
         const thinking = parsedFromEvents.thinking || '';
         const meteringCredits = parsedFromEvents.meteringCredits || null;
+        const contextUsagePercentage = parsedFromEvents.contextUsagePercentage ?? null;
         //logger.info(`[Kiro] Found ${allToolCalls.length} tool calls from event stream parsing.`);
 
         // 2. Crucial fix from Python example: Parse bracket tool calls from the original raw response
@@ -2934,7 +2940,7 @@ async saveCredentialsToFile(filePath, newData) {
         
         //logger.info(`[Kiro] Final response text after tool call cleanup: ${fullResponseText}`);
         //logger.info(`[Kiro] Final tool calls after deduplication: ${JSON.stringify(uniqueToolCalls)}`);
-        return { responseText: fullResponseText, toolCalls: uniqueToolCalls, thinking, meteringCredits };
+        return { responseText: fullResponseText, toolCalls: uniqueToolCalls, thinking, meteringCredits, contextUsagePercentage };
     }
 
     async generateContent(model, requestBody) {
@@ -2959,14 +2965,14 @@ async saveCredentialsToFile(filePath, newData) {
 
         const finalModel = MODEL_MAPPING[model] ? model : model;
         logger.info(`[Kiro] Calling generateContent with model: ${finalModel}`);
-        
-        // Estimate input tokens before making the API call
-        const inputTokens = this.estimateInputTokens(requestBody);
-        
+
+        // Estimate input tokens before making the API call (fallback if contextUsagePercentage not received)
+        const estimatedInputTokens = this.estimateInputTokens(requestBody);
+
         const response = await this.callApi('', finalModel, requestBody);
 
         try {
-            const { responseText, toolCalls, thinking, meteringCredits } = this._processApiResponse(response);
+            const { responseText, toolCalls, thinking, meteringCredits, contextUsagePercentage } = this._processApiResponse(response);
             const thinkingType = requestBody?.thinking?.type;
             const thinkingRequested = typeof thinkingType === 'string' &&
                 (thinkingType.toLowerCase() === 'enabled' || thinkingType.toLowerCase() === 'adaptive');
@@ -2999,6 +3005,17 @@ async saveCredentialsToFile(filePath, newData) {
                 for (const tc of toolCalls) {
                     if (tc?.function?.arguments) estOutputTokens += this.countTextTokens(tc.function.arguments);
                 }
+            }
+            // [F3] 与流式 (claude-kiro.js:3912-3920) 同口径: 优先用上游 contextUsagePercentage 推 inputTokens,
+            // 否则回落到本地 estimateInputTokens。两条路径同分母, calculateCacheTokens 反算结果可比。
+            let inputTokens;
+            if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
+                const contextTokens = getContextTokensForModel(model, this.config, finalModel);
+                const totalTokens = Math.round(contextTokens * contextUsagePercentage / 100);
+                inputTokens = Math.max(0, totalTokens - estOutputTokens);
+                logger.info(`[Kiro] Non-stream token calc from contextUsagePercentage: total=${totalTokens}, output=${estOutputTokens}, input=${inputTokens}`);
+            } else {
+                inputTokens = estimatedInputTokens;
             }
             const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, estOutputTokens, model);
             const cacheTokens = { cacheCreationTokens, cacheReadTokens };
