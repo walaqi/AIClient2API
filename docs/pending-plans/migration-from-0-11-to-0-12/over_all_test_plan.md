@@ -260,17 +260,18 @@
 - 出站 user 消息 content 中绝对找不到 &lt;thinking_mode&gt;adaptive&lt;/thinking_mode&gt; 等 inline 标签 —— 旧的 _generateThinkingPrefix 在出站路径已不再调用。
 - 入站 stream 里 reasoningContentEvent 仍能被解析为 Claude 兼容的 thinking content block 返回给客户端。
 
-**3.2.b — enabled + budget_tokens 模式**:
+**3.2.b — enabled 模式 (经 [Fix-D] 归一为 adaptive)**:
 1. 同上,但 thinking: { type: "enabled", budget_tokens: 4096 }。
 2. dump 出站 payload。
 
 **预期 (出站)**:
-- additionalModelRequestFields.thinking = { type: "enabled", budget_tokens: 4096 } (budget_tokens 经过 _normalizeThinkingBudgetTokens 校正,例如负数或超大值会被夹到合法范围)。
+- additionalModelRequestFields.thinking = { type: "adaptive" } (无 budget_tokens)。
+  原因: Kiro 0.12 服务端 thinking.type enum 仅接受 ["adaptive","disabled"];Phase 1 [Fix-D] 在 claude-kiro.js _normalize 路径将客户端 "enabled" 一并归到 adaptive, 且不下发 budget_tokens, 否则服务端 400。
 
 **3.2.c — disabled 或未传**:
 - thinking: { type: "disabled" } 或不传 thinking 字段时,出站 payload 中应完全不含 additionalModelRequestFields (或该字段为空对象);服务端等同关闭。
 
-**失败信号**: payload 里 additionalModelRequestFields 不存在 (Claude 4+ 应当存在);或 user 消息中仍能搜到 &lt;thinking_mode&gt; 文本;或 enabled 模式下 budget_tokens 缺失。
+**失败信号**: payload 里 additionalModelRequestFields 不存在 (Claude 4+ 应当存在);或 user 消息中仍能搜到 &lt;thinking_mode&gt; 文本;或 enabled 模式下出站 thinking.type !== "adaptive" (说明 [Fix-D] 归一未生效)。
 
 ---
 
