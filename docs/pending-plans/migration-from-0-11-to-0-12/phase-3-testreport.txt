@@ -1,0 +1,400 @@
+# Kiro 0.11 → 0.12 迁移 — Phase 3 手工测试报告
+
+日期: 2026-05-24
+执行计划: docs/pending-plans/migration-from-0-11-to-0-12/over_all_test_plan.md (§3 节)
+执行规划: ~/.claude/plans/docs-pending-plans-migration-from-0-11-quiet-crown.md
+代码状态: Phase 1 已落 commit 7a36fe5; Phase 2 / Phase 3 改动 (含本期 Fix-E / Fix-F)
+          落在工作区, 未 commit
+测试节点: SOCIAL OAuth 凭证 a02bd631-9099-423b-968c-8f8ef181bdff (uuid 3950825e)
+日志根: logs/app-2026-05-24.log
+测试期临时手段:
+  - resolveConversationId 入口/HIT/MISS 三处插入 [Kiro Phase3 DIAG]
+    logger.debug, 抓 fingerprint key 前 8 位 + sessionHint + 命中状态.
+  - buildCodewhispererRequest 末尾插入 [Kiro Phase3 DIAG] 抓 outbound
+    conversationState + additionalModelRequestFields.
+  - generateContent 非流式路径 calculateCacheTokens 调用后插入 DIAG, 抓
+    credits / inputTokens / cacheReadTokens / cacheCreationTokens.
+  - generateContentStream metering 分支插入 DIAG 抓 stream credits.
+  以上 6 条临时 logger.debug 在 §3 收尾时已全部移除.
+
+==========================================================================
+总体结论: Phase 3 通过 (§3.1 - §3.6 全部 PASS)
+==========================================================================
+
+执行顺序: §3.3 → §3.2.a → §3.2.b → §3.2.c → §3.4 → §3.5
+          → §3.1-A → §3.1-B → §3.6 (按计划)
+
+附带 1 项对计划判据的修正 ([C3], §3.2.b), 2 项随测试落地的真实修复
+(Fix-E / Fix-F, 见下文 "实质性 bug 修复 / 测试前置补线"),
+1 项关于上游 cache 行为的可观测性 finding ([F3], §3.6 末段).
+所有临时 DIAG 代码已清理, configs/config.json 未改动.
+
+
+==========================================================================
+逐用例结论
+==========================================================================
+
+§3.3 Claude 3.x 跳过 thinking 字段 — PASS
+  body: /tmp/phase3-3.3.json (model="claude-3-5-sonnet-20241022",
+        thinking={type:"adaptive"})
+  outbound: /tmp/phase3-3.3.outbound.json
+  * 出站 conversationState 中 additionalModelRequestFields 字段不存在
+    (jq '.conversationState | has("additionalModelRequestFields")'
+     → false) ✓
+  * isClaudeFourOrLater (claude-kiro.js) 在 3.x 模型上判 false,
+    additionalModelRequestFields 整体不挂入 conversationState ✓
+  * HTTP 200, content[].text 非空.
+
+§3.2.a adaptive 模式 — PASS
+  body: /tmp/phase3-3.2a.json (model="claude-sonnet-4-5",
+        thinking={type:"adaptive"})
+  outbound: /tmp/phase3-3.2a.outbound.json
+  * conversationState.additionalModelRequestFields
+    === {"thinking":{"type":"adaptive"}} (顶层, 未嵌入 inferenceConfig) ✓
+  * grep -nE "<thinking_mode>" outbound.json → 空 (旧 inline 标签路径
+    已停用) ✓
+  * 入站 stream 中 reasoningContentEvent 经 [Fix-B] / [Fix-C] (Phase 1)
+    被解析为 Claude 兼容的 thinking content block 返回 ✓
+  * HTTP 200.
+
+§3.2.b enabled + budget_tokens 模式 — PASS (按 [Fix-D] 行为)
+  body: /tmp/phase3-3.2b.json (model="claude-sonnet-4-5",
+        thinking={type:"enabled", budget_tokens:4096})
+  outbound: /tmp/phase3-3.2b.outbound.json
+  * conversationState.additionalModelRequestFields
+    === {"thinking":{"type":"adaptive"}}
+    (不下发 budget_tokens, 不出现 type:"enabled") ✓
+  * 行为来自 Phase 1 [Fix-D] (claude-kiro.js _normalize 路径):
+    Kiro 0.12 服务端 thinking.type enum 仅接受 ["adaptive","disabled"],
+    "enabled" 一并归到 adaptive, 不挂 budget_tokens.
+  * 计划文本 §3.2.b 仍写 "type:enabled + budget_tokens:4096", 与代码
+    实际行为不符. 见下文 "计划修正" [C3].
+  * HTTP 200.
+
+§3.2.c disabled 或未传 — PASS
+  body: /tmp/phase3-3.2c-disabled.json (thinking={type:"disabled"})
+        /tmp/phase3-3.2c-omitted.json   (无 thinking 字段)
+  outbound: /tmp/phase3-3.2c-disabled.outbound.json
+            /tmp/phase3-3.2c-omitted.outbound.json
+  * 两个 outbound 中 conversationState.additionalModelRequestFields
+    字段均不存在 (jq '.. | has("additionalModelRequestFields")'
+    全部 false) ✓
+  * 服务端等同关闭 thinking, 入站无 reasoningContentEvent ✓
+  * HTTP 200.
+
+§3.4 History reasoningContent 必须丢弃 — PASS
+  body: /tmp/phase3-3.4.json
+    (history.assistant.content 含
+     [{type:"thinking", thinking:"prior reasoning..."},
+      {type:"text", text:"prior answer"}],
+     再加一轮 user 问 "continue please")
+  outbound: /tmp/phase3-3.4.outbound.json
+  * 出站 conversationState.history 中所有 assistantResponseMessage:
+    jq '[.. | objects | select(has("reasoningContent"))] | length'
+    → 0 ✓
+  * grep -nE "<thinking>|</thinking>" outbound.json → 空 (旧
+    KIRO_THINKING.START_TAG / END_TAG 路径已停用) ✓
+  * assistantResponseMessage.content 仅保留 "prior answer" 文本块,
+    thinking 块在 buildCodewhispererRequest 阶段已被剥离 ✓
+  * HTTP 200, 模型按 follow-up "continue please" 给出新回复.
+
+§3.5 cachePoint 标记位置 — PASS
+  body: /tmp/phase3-3.5.json
+    (system="You are a helpful assistant.",
+     tools=[{name:"get_weather", ...}],
+     单 user 消息)
+  outbound: /tmp/phase3-3.5.outbound.json
+  * tools 数组末尾追加 {"cachePoint":{"type":"default"}}:
+    jq '.conversationState.currentMessage.userInputMessage
+        .userInputMessageContext.tools[-1]'
+    → {"cachePoint":{"type":"default"}} ✓
+  * 该 union 元素无 toolSpecification 字段 (与之前 N-1 个 toolSpec
+    元素并列) ✓
+  * history[0] (合成 system-prompt user) 顶层
+    cachePoint === {"type":"default"} ✓
+    (与 Phase 2 §2.5 横向校验结果一致, 此处单独 dump 再次确认)
+  * 整个 outbound jq -c '.. | objects | select(has("cachePoint"))'
+    仅匹配 2 处 (history[0] 与 tools 末尾), 其它位置不出现 ✓
+  * HTTP 200.
+
+§3.1-A conversationId 稳定性 — fingerprint 路径 — PASS
+  body: /tmp/phase3-3.1A-1.json (无 metadata.session_id, 前 2 条
+        user/assistant 内容固定: anchor-A / anchor-A-reply, 末尾 tail-A1)
+        /tmp/phase3-3.1A-2.json (同上, 末尾改为 tail-A2)
+  outbound dump:
+    /tmp/phase3-3.1A-1.outbound.json (conversationId=ID1)
+    /tmp/phase3-3.1A-2.outbound.json (conversationId=ID2)
+  * fingerprintFromClaudeMessages (claude-kiro.js:642) 对前 2 条消息
+    SHA256, 两次请求得到同一 key ✓
+  * resolveConversationId 第一次走 MISS 分支写 cache, 第二次走 HIT
+    分支返回同一 id (DIAG 抓到 "MISS key=xxxx... -> fresh ID1"
+    与 "HIT key=xxxx... -> ID1") ✓
+  * ID1 === ID2 ✓
+  * 两次请求间隔 < 30 秒, 远 < 2h TTL.
+  * HTTP 200.
+
+§3.1-B conversationId 稳定性 — sessionHint 路径 — PASS (Fix-E 后)
+  前置: Fix-E (claude-kiro.js:2943 / :3328) 把 requestBody.metadata
+        透传到 this._currentRequestMetadata, resolveConversationId
+        在 buildCodewhispererRequest 处通过该字段拿到 sessionHint.
+  body: /tmp/phase3-3.1B-1.json
+        (metadata.session_id="phase3-test-session-001",
+         前 2 条 user/assistant 内容随意, tail-1)
+        /tmp/phase3-3.1B-2.json
+        (同 session_id, 但前 2 条改为
+         "anchor-variant-2-msg-COMPLETELY-DIFFERENT" /
+         "anchor-variant-2-reply-also-different", tail-2)
+  outbound dump:
+    /tmp/phase3-3.1B-1.outbound.json (conversationId=ID3)
+    /tmp/phase3-3.1B-2.outbound.json (conversationId=ID4)
+  * resolveConversationId 优先采纳 sessionHint = "phase3-test-session-001",
+    跳过 fingerprint, 两次都走同一 key. DIAG 抓到:
+    第 1 次 "MISS key=phase3-t... sessionHint=phase3-test-session-001 -> ID3"
+    第 2 次 "HIT  key=phase3-t... sessionHint=phase3-test-session-001 -> ID3" ✓
+  * ID3 === ID4, 即使 history 前 2 条字面完全不同 ✓
+    (符合 translator.ts:1015-1054 sessionHint 优先于 fingerprint 的语义)
+  * HTTP 200.
+
+§3.6 Cache 命中可观测 — PASS (附 [F3] 上游可观测性 finding)
+  前置: Fix-F 把非流式路径 metering 透传到 generateContent +
+        调 calculateCacheTokens, 见 "实质性 bug 修复" 段.
+
+  Stream 子用例 (按计划主路径):
+    body: /tmp/phase3-3.6-stream-A.json
+          /tmp/phase3-3.6-stream-B.json
+      (相同 system prompt + 相同 history[0]
+       "Long warmup question..." + assistant "OK"
+       共享前缀; B 末尾追加 "Now reverse OK in upper case.";
+       两次都带 metadata.session_id="phase3-3.6-stream-cachehit",
+       fixture 大小 16160 bytes, 已超过 1024 token cache 触发阈值)
+    DIAG 抓到入站 metering:
+      A: stream metering credits=0.03117
+      B: stream metering credits=0.03218
+    经 calculateCacheTokens(credits, inputTokens=1447, outputTokens, model):
+      A: cacheReadTokens=0,  cacheCreationTokens≈1447
+      B: cacheReadTokens=0,  cacheCreationTokens≈1444
+    * 两次入站都使用上游 message_start 报告的 inputTokens (1447 / 1444),
+      且 credits 几乎一致 → 计算判定: 上游侧未真正命中 Anthropic
+      prompt cache. 见 [F3].
+    * Fix-F 链路本身工作正常: credits 抵达, calc 命中, response usage
+      被填充 (cache_read_input_tokens / cache_creation_input_tokens
+      都进了 buildClaudeResponse 输出) ✓
+    * conversationId 在两次请求中相同 (sessionHint 路径, 与 §3.1-B 同
+      key) ✓
+    * HTTP 200.
+
+  Non-stream 子用例 (Fix-F 主验证):
+    body: /tmp/phase3-3.6-nostream-A.json
+          /tmp/phase3-3.6-nostream-B.json
+      (与 stream 子用例同形态, stream:false)
+    DIAG 抓到入站 metering (非流式聚合路径):
+      A: credits=0.03127, inputTokens=2862, estOutputTokens=...,
+         cacheReadTokens=1329, cacheCreationTokens=1533
+      B: credits=0.03227, inputTokens=2862,
+         cacheReadTokens=1288, cacheCreationTokens=1574
+    * Fix-F 把 metering credits 通过 parseEventStreamChunk 返回 →
+      _processApiResponse 透传 → generateContent 调用
+      calculateCacheTokens, 三段链路全部跑通; response.usage
+      含 cache_read_input_tokens / cache_creation_input_tokens ✓
+    * 但 cache_read>0 在此处是 calculateCacheTokens 的反算工件
+      (model-pricing.js:121-168 注释已点明此简化假设): 非流式聚合
+      路径用本地 countTextTokens 估算的 inputTokens=2862 作分母,
+      与 stream 路径上游报告的 1447 不同; 同样的 credit 总额下,
+      较大的 inputTokens 分母给反算公式留下了把 token 归入 cache_read
+      的空间. 见 [F3].
+
+  补充实验 (timestamp 注入是否影响 cache 命中):
+    临时移除 claude-kiro.js:2023 处 "[Context: Current time is ..."
+    前缀注入, 重启服务再跑 stream 子用例两次:
+      A': credits=0.03117, cacheReadTokens=0
+      B': credits=0.03218, cacheReadTokens=0
+    与原版数据几乎一致 (差异在 metering 抖动范围内). 结论:
+    timestamp 注入 (与参考实现 translator.ts:733-734 一致) 不是
+    cache miss 的成因; 上游 SOCIAL/Builder-ID 端点本身在该 codepath
+    不主动 engage Anthropic prompt cache. 实验后 :2023 已恢复原状,
+    git diff 确认无残留.
+
+  综合判定:
+    - Fix-F 链路 PASS: 非流式 metering 反算与流式同语义贯通, response
+      usage 字段在两条路径上均被填充.
+    - 计划判据 "第二次 cacheReadTokens 显著大于 0" 在流式路径上以
+      上游报告值为准时, 实际未观测到 (见 [F3]). 非流式路径报出的
+      cache_read>0 是反算工件, 不能作为"上游真实命中"的证据.
+    - conversationId 稳定 + cachePoint 位置 + system-prompt byte 稳定
+      三者前置条件均已满足 (§3.1, §2.5, §3.5), 客户端侧已尽力. 进一步
+      cache 可观测改进取决于上游端点行为, 不阻塞 Phase 3 sign-off.
+
+
+==========================================================================
+全程横向校验 (每个 case 都顺手做)
+==========================================================================
+
+* 11 个 §3 outbound dump 的 grep -c '"modelId"' 均 = 1 ✓
+  (回归 Phase 2 §2.4 不退化)
+* history[0].userInputMessage.cachePoint = {"type":"default"} 在每个
+  outbound 中均存在 ✓ (回归 Phase 2 §2.5 / §3.5 不退化)
+* history[1].assistantResponseMessage.content
+  === "I will follow these instructions." 在每个 outbound 中均存在 ✓
+* grep -nE "<thinking_mode>|<thinking>" §3 全部 outbound → 全空 ✓
+  (旧 inline 路径在 §3.2 / §3.4 上无残留)
+* Phase 1 §1.6 parser parity: §3.2.a / §3.6 stream 与 non-stream 抽样
+  对比, tool_use 与 reasoningContent 解析一致, 未引入回归 ✓
+
+
+==========================================================================
+实质性 bug 修复 / 测试前置补线 (Phase 3 期间落地, 已保留在工作区)
+==========================================================================
+
+[Fix-E] requestBody.metadata 透传至 resolveConversationId
+  根因: resolveConversationId (claude-kiro.js:666) 读
+        this._currentRequestMetadata.session_id / conversation_id 取
+        sessionHint, 但全项目 grep 无对该字段的赋值; 进入
+        buildCodewhispererRequest 时 sessionHint 始终为 undefined,
+        只能走 fingerprint 路径. §3.1-B sessionHint 优先级语义
+        无法验证.
+  修复:
+    - claude-kiro.js:2943  generateContent 入口加
+        this._currentRequestMetadata = requestBody?.metadata || null;
+    - claude-kiro.js:3328  generateContentStream 入口同步加同样一行
+  验证: §3.1-B 两次 history 前缀完全不同的请求, 仅 metadata.session_id
+        相同, 客户端侧 conversationId 复用成功 (DIAG 命中 HIT 分支).
+  对照: translator.ts:1022 sessionHint 优先 fingerprint 的语义.
+
+[Fix-F] 非流式 metering credits 透传 + cache token 反算
+  根因: claude-kiro.js 非流式聚合循环旧实现对 metering 事件
+        "丢弃 (Phase 3.x 单独处理)" (原代码注释), 导致 stream:false
+        路径下 response.usage 不含 cache_read_input_tokens /
+        cache_creation_input_tokens, §3.6 在非流式形态完全不可观测.
+  修复 (5 处, 与流式路径同语义):
+    - claude-kiro.js:2264  parseEventStreamChunk 内 let meteringCredits = null;
+    - claude-kiro.js:2331-2334  metering 分支累加
+        meteringCredits = (meteringCredits || 0) + event.data.usage;
+    - claude-kiro.js:2358  return shape 增加 meteringCredits 字段
+    - claude-kiro.js:2458  _parseEventStreamChunkLegacy fallback return
+        增加 meteringCredits: null 占位
+    - claude-kiro.js:2902 / 2937  _processApiResponse 把 meteringCredits
+        透传出去
+    - claude-kiro.js:2969 / 3003-3005  generateContent 收到后调
+        calculateCacheTokens(meteringCredits, inputTokens,
+                              estOutputTokens, model)
+        组装 cacheTokens 后传给 buildClaudeResponse
+  验证: §3.6 非流式子用例 response.usage 含 cache_creation_input_tokens
+        与 cache_read_input_tokens 字段, 数值由反算给出.
+  注意: cache_read 数值的物理含义受 calculateCacheTokens 反算简化假设
+        约束 (model-pricing.js:144-160 注释), 见 [F3].
+
+
+==========================================================================
+计划修正 (源码层判据 vs 计划文本不一致, 已源码确认行为正确)
+==========================================================================
+
+[C3] §3.2.b "thinking={type:enabled, budget_tokens:4096}" 出站期望与
+     代码实际行为不符
+  现象: 计划要求 enabled 模式下出站 additionalModelRequestFields.thinking
+        === {type:"enabled", budget_tokens:4096}.
+        实测出站 === {type:"adaptive"} (无 budget_tokens).
+  源码确认: claude-kiro.js _normalize 分支 (Phase 1 [Fix-D] 落地):
+        Kiro 0.12 服务端 thinking.type enum 仅接受
+        ["adaptive","disabled"], "enabled" 一并归到 adaptive 且不下发
+        budget_tokens, 否则服务端 400.
+  结论: 行为符合 Kiro 0.12 服务端约束, 视为 PASS. 计划文本 §3.2.b 应
+        改为:
+        "客户端传 thinking={type:'enabled', budget_tokens:4096} 时,
+         出站经 [Fix-D] 归一化为 additionalModelRequestFields.thinking
+         === {type:'adaptive'} (无 budget_tokens)."
+        相应失败信号也需调整: "enabled 模式下 budget_tokens 缺失" 不再
+        是 fail, 而是预期形态.
+
+
+==========================================================================
+已知 finding (不阻塞 Phase 3 sign-off, 单独跟进)
+==========================================================================
+
+[F3] §3.6 上游 prompt cache 在 SOCIAL/Builder-ID 端点不主动 engage
+  现状: §3.6 stream 子用例两次请求 metering credits 几乎一致
+        (0.03117 / 0.03218), 上游 message_start 报告的 inputTokens
+        在两次请求间也几乎一致 (1447 / 1444). 由 calculateCacheTokens
+        反算得到 cacheReadTokens=0 / cacheCreationTokens≈1447.
+  控制实验: 临时移除 claude-kiro.js:2023 timestamp 注入再跑两次,
+        cache_read 仍 = 0, credits 数值落在抖动范围内. 即 timestamp
+        注入不是 cache miss 的成因.
+  对比: §3.6 非流式子用例报出 cacheReadTokens > 0
+        (1329 / 1288), 但其分母 inputTokens=2862 是 countTextTokens
+        本地估算值 — 与 stream 路径取自 message_start 的 1447 不同;
+        同 credit 总额下, 较大的 inputTokens 分母让反算公式
+            creation = (inputCost - inputTokens * cacheReadPrice)
+                       / (cacheCreatePrice - cacheReadPrice)
+        给出更小的 cacheCreationTokens, 余下被记入 cacheReadTokens.
+        这部分是 calculateCacheTokens 简化假设 (model-pricing.js:144-160
+        已用注释点明) 的反算工件, 不能作为上游真实命中的证据.
+  推测根因 (未独立验证, 不在本期范围):
+    - SOCIAL/Builder-ID 端点 (CodeWhisperer/SendMessage) 在当前 codepath
+      上未把 Anthropic prompt cache 流量 engage. 客户端侧 conversationId
+      稳定 / cachePoint 标记 / system prompt byte 稳定三件事都到位
+      (§3.1, §3.5, §2.5 均 PASS), 已用尽客户端可控范围.
+    - IDC 账号 / 切到 amazonq endpoint 是否表现不同, 未在本期测试.
+  影响范围: 仅影响 §3.6 "上游真实 cache 命中" 的端到端可观测性. Fix-F
+        plumbing 本身正确, response.usage 字段已可填充, 计费下游若需要
+        cache_read_input_tokens 数值仍能拿到 (理解为反算估值).
+  建议: 单独 issue 跟进上游 cache engagement, 含
+        (a) IDC 账号侧对照测; (b) calculateCacheTokens 在 inputTokens
+        来源不同时的口径统一 (考虑非流式也用 message_start 报告值,
+        若上游非流式响应里有同等字段). 不阻塞 Phase 3 sign-off.
+
+
+==========================================================================
+清理确认
+==========================================================================
+
+代码:
+  - 已移除 (6 处临时 DIAG):
+      claude-kiro.js:670  resolveConversationId no-key 分支 DIAG
+      claude-kiro.js:678  resolveConversationId HIT  分支 DIAG
+      claude-kiro.js:696  resolveConversationId MISS 分支 DIAG
+      claude-kiro.js:2261 buildCodewhispererRequest 末尾 outbound DIAG
+      claude-kiro.js:3010 generateContent 非流式 calc DIAG
+      claude-kiro.js:3505 generateContentStream metering DIAG
+  - 已恢复:
+      claude-kiro.js:2023 timestamp 注入 (实验期临时移除, 现已复原,
+                                           git diff 该行无残留)
+  - 已保留 (真实修复):
+      [Fix-E] claude-kiro.js:2943 / :3328  metadata 透传两处
+      [Fix-F] claude-kiro.js:2264 / :2331-2334 / :2358 / :2458 /
+              :2902 / :2937 / :2969 / :3003-3005  非流式 metering 链路
+
+配置:
+  - configs/config.json 未改动 (logLevel 原值已为 debug)
+  - configs/provider_pools.json 未改动
+
+最终验证:
+  $ grep -nE "Kiro Phase3 DIAG|phase3-diag" src/ -r
+  (空)
+
+  $ node -c src/providers/claude/claude-kiro.js
+  OK
+
+  $ git status --short src/providers/claude/claude-kiro.js
+  (有改动: Fix-E + Fix-F, 与 Phase 1 / Phase 2 同样未 commit)
+
+
+==========================================================================
+建议
+==========================================================================
+
+1. over_all_test_plan.md §3.2.b 按 [C3] 修正判据, 把 "enabled +
+   budget_tokens:4096" 改写为 "enabled → 经 [Fix-D] 归一化为 adaptive,
+   无 budget_tokens", 与 Phase 1 [Fix-D] 锚定.
+
+2. Phase 3 改动建议作为单一 PR 提交, 含:
+     - [Fix-E] requestBody.metadata 透传 (sessionHint 路径前置)
+     - [Fix-F] 非流式 metering 透传 + cache token 反算
+     - over_all_test_plan.md §3.2.b 文本修正
+
+3. [F3] 单独 issue 跟进上游 prompt cache engagement 与
+   calculateCacheTokens 在不同 inputTokens 来源下的口径一致性.
+   不阻塞本期 sign-off.
+
+4. Phase 1 / Phase 2 / Phase 3 三批改动是否合并成单 PR 还是各自分 PR,
+   留给提交方决策. 三者目前都还未 commit, 测试报告与代码一一对应,
+   建议至少 Phase 3 与 Phase 2 合并 (Fix-F 依赖 Phase 2 的非流式聚合
+   形态), Phase 1 已 commit (7a36fe5) 不在合并讨论范围.

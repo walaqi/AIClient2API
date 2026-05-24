@@ -665,7 +665,9 @@ function fingerprintFromClaudeMessages(messages) {
 
 function resolveConversationId(messages, sessionHint) {
     const key = sessionHint || fingerprintFromClaudeMessages(messages);
-    if (!key) return uuidv4();
+    if (!key) {
+        return uuidv4();
+    }
 
     const now = Date.now();
     const cached = kiroConversationCache.get(key);
@@ -2259,6 +2261,7 @@ async saveCredentialsToFile(filePath, newData) {
         const buf = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData);
         let fullContent = '';
         let thinking = '';
+        let meteringCredits = null;
         const toolCalls = [];
         let currentToolCallDict = null;
 
@@ -2325,8 +2328,12 @@ async saveCredentialsToFile(filePath, newData) {
                 // Kiro 0.12 通过 reasoningContentEvent 单独推送思考链；非流式路径需要累加,
                 // 由调用方根据 thinking 是否被请求决定是否产出 thinking content block。
                 thinking += event.data;
+            } else if (event.type === 'metering' && event.data && typeof event.data.usage === 'number') {
+                // Kiro 0.12 metering.usage 是 credit 数 (number, 非 token 对象)。非流式聚合路径
+                // 与流式路径保持一致: 累加 credit, 由 calculateCacheTokens 反算 cache_read / cache_creation。
+                meteringCredits = (meteringCredits || 0) + event.data.usage;
             }
-            // metering / contextUsage: 非流式聚合路径仍然丢弃 (Phase 3.x 单独处理)
+            // contextUsage: 非流式聚合路径仍然丢弃 (Phase 3.x 单独处理)
         }
 
         // 流末尾仍有未关闭的工具调用 (服务端漏发 stop)
@@ -2348,7 +2355,7 @@ async saveCredentialsToFile(filePath, newData) {
         }
 
         const uniqueToolCalls = restoreKiroToolCallNames(deduplicateToolCalls(toolCalls), toolNameMaps);
-        return { content: fullContent || '', toolCalls: uniqueToolCalls, thinking };
+        return { content: fullContent || '', toolCalls: uniqueToolCalls, thinking, meteringCredits };
     }
 
     _parseEventStreamChunkLegacy(rawStr, toolNameMaps = null) {
@@ -2448,7 +2455,7 @@ async saveCredentialsToFile(filePath, newData) {
         }
 
         const uniqueToolCalls = restoreKiroToolCallNames(deduplicateToolCalls(toolCalls), toolNameMaps);
-        return { content: fullContent || '', toolCalls: uniqueToolCalls, thinking: '' };
+        return { content: fullContent || '', toolCalls: uniqueToolCalls, thinking: '', meteringCredits: null };
     }
 
 
@@ -2892,6 +2899,7 @@ async saveCredentialsToFile(filePath, newData) {
         let fullResponseText = parsedFromEvents.content;
         let allToolCalls = [...parsedFromEvents.toolCalls]; // clone
         const thinking = parsedFromEvents.thinking || '';
+        const meteringCredits = parsedFromEvents.meteringCredits || null;
         //logger.info(`[Kiro] Found ${allToolCalls.length} tool calls from event stream parsing.`);
 
         // 2. Crucial fix from Python example: Parse bracket tool calls from the original raw response
@@ -2926,11 +2934,13 @@ async saveCredentialsToFile(filePath, newData) {
         
         //logger.info(`[Kiro] Final response text after tool call cleanup: ${fullResponseText}`);
         //logger.info(`[Kiro] Final tool calls after deduplication: ${JSON.stringify(uniqueToolCalls)}`);
-        return { responseText: fullResponseText, toolCalls: uniqueToolCalls, thinking };
+        return { responseText: fullResponseText, toolCalls: uniqueToolCalls, thinking, meteringCredits };
     }
 
     async generateContent(model, requestBody) {
         if (!this.isInitialized) await this.initialize();
+
+        this._currentRequestMetadata = requestBody?.metadata || null;
 
         // 临时存储 monitorRequestId
         if (requestBody._monitorRequestId) {
@@ -2940,13 +2950,13 @@ async saveCredentialsToFile(filePath, newData) {
         if (requestBody._requestBaseUrl) {
             delete requestBody._requestBaseUrl;
         }
-        
+
         // 检查 token 是否即将过期，如果是则推送到刷新队列
         if (this.isExpiryDateNear()) {
             logger.info('[Kiro] Token is near expiry, marking credential as need refresh...');
             this._markCredentialNeedRefresh('Token near expiry in generateContent');
         }
-        
+
         const finalModel = MODEL_MAPPING[model] ? model : model;
         logger.info(`[Kiro] Calling generateContent with model: ${finalModel}`);
         
@@ -2956,7 +2966,7 @@ async saveCredentialsToFile(filePath, newData) {
         const response = await this.callApi('', finalModel, requestBody);
 
         try {
-            const { responseText, toolCalls, thinking } = this._processApiResponse(response);
+            const { responseText, toolCalls, thinking, meteringCredits } = this._processApiResponse(response);
             const thinkingType = requestBody?.thinking?.type;
             const thinkingRequested = typeof thinkingType === 'string' &&
                 (thinkingType.toLowerCase() === 'enabled' || thinkingType.toLowerCase() === 'adaptive');
@@ -2973,7 +2983,26 @@ async saveCredentialsToFile(filePath, newData) {
             } else {
                 contentForClaude = responseText;
             }
-            return this.buildClaudeResponse(contentForClaude, false, 'assistant', model, toolCalls, inputTokens);
+            // 输出 token 估算: 用最终交付给客户端的内容
+            let estOutputTokens = 0;
+            if (Array.isArray(contentForClaude)) {
+                for (const b of contentForClaude) {
+                    if (b && typeof b === 'object') {
+                        if (typeof b.text === 'string') estOutputTokens += this.countTextTokens(b.text);
+                        if (typeof b.thinking === 'string') estOutputTokens += this.countTextTokens(b.thinking);
+                    }
+                }
+            } else if (typeof contentForClaude === 'string') {
+                estOutputTokens = this.countTextTokens(contentForClaude);
+            }
+            if (Array.isArray(toolCalls)) {
+                for (const tc of toolCalls) {
+                    if (tc?.function?.arguments) estOutputTokens += this.countTextTokens(tc.function.arguments);
+                }
+            }
+            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, estOutputTokens, model);
+            const cacheTokens = { cacheCreationTokens, cacheReadTokens };
+            return this.buildClaudeResponse(contentForClaude, false, 'assistant', model, toolCalls, inputTokens, cacheTokens);
         } catch (error) {
             logger.error('[Kiro] Error in generateContent:', error);
             throw error;
@@ -3295,6 +3324,8 @@ async saveCredentialsToFile(filePath, newData) {
     // 真正的流式传输实现
     async * generateContentStream(model, requestBody) {
         if (!this.isInitialized) await this.initialize();
+
+        this._currentRequestMetadata = requestBody?.metadata || null;
 
         // 临时存储 monitorRequestId
         if (requestBody._monitorRequestId) {
@@ -3946,7 +3977,7 @@ async saveCredentialsToFile(filePath, newData) {
     /**
      * Build Claude compatible response object
      */
-    buildClaudeResponse(content, isStream = false, role = 'assistant', model, toolCalls = null, inputTokens = 0) {
+    buildClaudeResponse(content, isStream = false, role = 'assistant', model, toolCalls = null, inputTokens = 0, cacheTokens = null) {
         const messageId = `${uuidv4()}`;
 
         if (isStream) {
@@ -4133,6 +4164,21 @@ async saveCredentialsToFile(filePath, newData) {
                 // 不再设置 stopReason = "max_tokens"，避免 Claude Code 客户端误触发 64K 上限错误
             }
 
+            // Claude API 语义: total_input = input_tokens + cache_creation + cache_read
+            const cacheCreationTokens = cacheTokens?.cacheCreationTokens || 0;
+            const cacheReadTokens = cacheTokens?.cacheReadTokens || 0;
+            const reportedInput = cacheTokens
+                ? Math.max(0, inputTokens - cacheCreationTokens - cacheReadTokens)
+                : inputTokens;
+            const usage = {
+                input_tokens: reportedInput,
+                output_tokens: outputTokens
+            };
+            if (cacheTokens) {
+                usage.cache_creation_input_tokens = cacheCreationTokens;
+                usage.cache_read_input_tokens = cacheReadTokens;
+            }
+
             return {
                 id: messageId,
                 type: "message",
@@ -4140,10 +4186,7 @@ async saveCredentialsToFile(filePath, newData) {
                 model: model,
                 stop_reason: stopReason,
                 stop_sequence: null,
-                usage: {
-                    input_tokens: inputTokens,
-                    output_tokens: outputTokens
-                },
+                usage,
                 content: contentArray
             };
         }
