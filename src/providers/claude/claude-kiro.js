@@ -3520,8 +3520,10 @@ async saveCredentialsToFile(filePath, newData) {
 
             const estimatedInputTokens = this.estimateInputTokens(requestBody);
 
-            // 1. 先发送 message_start 事件
-            yield {
+            // 1. 构造 message_start, 但延迟到 streamApiReal 推出第一个非 __kiroStreamEnd 事件后再 yield
+            //    这样 axios.request 阶段抛出的 401/403/429/5xx 不会让 common.js 的 anyDataSent 变 true,
+            //    L802 "Cannot retry" 闸门不再卡住凭证切换重试
+            const messageStartEvent = {
                 type: "message_start",
                 message: {
                     id: messageId,
@@ -3537,6 +3539,7 @@ async saveCredentialsToFile(filePath, newData) {
                     content: []
                 }
             };
+            let messageStartEmitted = false;
 
             // 2. 流式接收并发送每个 content_block_delta
             for await (const event of this.streamApiReal('', finalModel, requestBody)) {
@@ -3545,6 +3548,10 @@ async saveCredentialsToFile(filePath, newData) {
                     wasTruncated = wasTruncated || !!event.truncated;
                     streamEndInfo = { bufferRemain: event.bufferRemain || 0, socketAborted: !!event.socketAborted };
                     continue;
+                }
+                if (!messageStartEmitted) {
+                    yield messageStartEvent;
+                    messageStartEmitted = true;
                 }
                 if (event.type === 'contextUsage' && event.contextUsagePercentage) {
                     // 捕获上下文使用百分比（包含输入和输出的总使用量）
@@ -3995,6 +4002,10 @@ async saveCredentialsToFile(filePath, newData) {
                 logger.warn(`[Kiro Stream] Thinking-only response; reporting stop_reason=end_turn`);
             }
             logger.info(`[Kiro Stream] STREAM_SUMMARY model=${finalModel} stopReason=${stopReason} truncated=${wasTruncated} bufferRemain=${streamEndInfo.bufferRemain} socketAborted=${streamEndInfo.socketAborted} toolCalls=${toolCalls.length} outTok=${outputTokens} visibleText=${streamState.hasVisibleText} thinkingOnly=${emittedOnlyThinking} durMs=${Date.now() - streamStartMs}`);
+            if (!messageStartEmitted) {
+                yield messageStartEvent;
+                messageStartEmitted = true;
+            }
             yield {
                 type: "message_delta",
                 delta: { stop_reason: stopReason },
