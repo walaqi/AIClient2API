@@ -1947,6 +1947,9 @@ async saveCredentialsToFile(filePath, newData) {
             // 名称完全匹配（大小写敏感）。
             const TRUNCATION_WHITELIST = new Set([
                 'Bash',
+                'Write',
+                'Edit',
+                'Agent'
             ]);
 
             let truncatedCount = 0;
