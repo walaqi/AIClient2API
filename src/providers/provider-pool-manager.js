@@ -650,6 +650,82 @@ export class ProviderPoolManager {
     }
 
     /**
+     * [HC-DIAG] 诊断专用日志：
+     * 始终走 logger.info，不受 this.logLevel 影响，方便生产环境抓诊断日志。
+     * @private
+     */
+    _diag(message) {
+        logger.info(`[HC-DIAG] ${message}`);
+    }
+
+    /**
+     * [HC-DIAG] 把代理 URL 中的用户名/密码脱敏，保留协议+host:port+路径+session 模式。
+     * @private
+     */
+    _redactProxyUrl(url) {
+        if (!url || typeof url !== 'string') return String(url);
+        try {
+            const u = new URL(url);
+            const cred = (u.username || u.password) ? '***:***@' : '';
+            return `${u.protocol}//${cred}${u.host}${u.pathname || ''}${u.search || ''}`;
+        } catch (_) {
+            return url.replace(/\/\/[^@\/]+@/, '//***:***@');
+        }
+    }
+
+    /**
+     * [HC-DIAG] token / refreshToken 脱敏：保留前 4 + 后 4 字符。
+     * @private
+     */
+    _redactToken(token) {
+        if (token == null) return 'null';
+        const s = String(token);
+        if (s.length <= 8) return `len=${s.length}`;
+        return `${s.slice(0, 4)}...${s.slice(-4)} (len=${s.length})`;
+    }
+
+    /**
+     * [HC-DIAG] 从 axios 实例中提取当前实际绑定的代理 URL。
+     * 检查 defaults.httpsAgent / defaults.httpAgent，尝试从 agent.proxy 读取。
+     * 返回 { httpsProxy, httpProxy, type } 形式的描述。
+     * @private
+     */
+    _describeAxiosProxy(axiosInstance) {
+        if (!axiosInstance || !axiosInstance.defaults) {
+            return { httpsProxy: 'no-axios', httpProxy: 'no-axios', proxyDisabled: null };
+        }
+        const d = axiosInstance.defaults;
+        const describe = (agent) => {
+            if (!agent) return 'none';
+            // HttpsProxyAgent / HttpProxyAgent / SocksProxyAgent: 通常带 .proxy 字段
+            const px = agent.proxy;
+            if (!px) {
+                // socks-proxy-agent 内部叫 proxy / options
+                const opts = agent.options || agent.connectOpts || null;
+                if (opts && opts.host) {
+                    const protocol = opts.protocol || (agent.constructor && agent.constructor.name) || 'unknown';
+                    return `${protocol}//${opts.host}:${opts.port || '?'}`;
+                }
+                return `agent(${agent.constructor ? agent.constructor.name : 'unknown'}) noProxyField`;
+            }
+            if (typeof px === 'string') return this._redactProxyUrl(px);
+            if (typeof px === 'object') {
+                const proto = px.protocol || (px.host && px.port ? 'http:' : 'unknown');
+                const host = px.host || px.hostname || 'unknown';
+                const port = px.port || '?';
+                const cred = (px.username || px.auth) ? '***:***@' : '';
+                return `${proto}//${cred}${host}:${port}`;
+            }
+            return 'unknown-proxy-shape';
+        };
+        return {
+            httpsProxy: describe(d.httpsAgent),
+            httpProxy: describe(d.httpAgent),
+            proxyDisabled: d.proxy === false ? true : (d.proxy === undefined ? null : false)
+        };
+    }
+
+    /**
      * 获取节点的显示名称（优先显示自定义名称/别名）
      * @param {object} config - 节点配置对象
      * @returns {string} 显示名称
@@ -2098,6 +2174,11 @@ export class ProviderPoolManager {
     async performHealthChecks() {
         const scheduledConfig = this.globalConfig?.SCHEDULED_HEALTH_CHECK;
         const checkStartTime = Date.now();
+
+        // [HC-DIAG] 调度入口：interval / startupRun / 选中的 providerTypes
+        this._diag(`performHealthChecks ENTER enabled=${!!scheduledConfig?.enabled} ` +
+            `interval=${scheduledConfig?.interval} startupRun=${scheduledConfig?.startupRun} ` +
+            `providerTypes=${JSON.stringify(scheduledConfig?.providerTypes || [])}`);
         
         // Check if scheduled health checks are disabled
         if (!scheduledConfig?.enabled) {
@@ -2163,7 +2244,7 @@ export class ProviderPoolManager {
                 }
 
                 // Perform health check (health check is based on providerTypes configuration, not per-provider checkHealth flag)
-                const result = await this._checkProviderHealth(providerType, provider.config);
+                const result = await this._checkProviderHealth(providerType, provider.config, { diagSource: 'scheduled' });
                 const checkDuration = Date.now() - providerCheckStart;
                 
                 if (!result.success) {
@@ -2285,19 +2366,30 @@ export class ProviderPoolManager {
      * @param {object} providerConfig - The configuration of the provider to check.
      * @returns {Promise<{success: boolean, modelName: string, errorMessage: string}>} - Health check result object.
      */
-    async _checkProviderHealth(providerType, providerConfig) {
+    async _checkProviderHealth(providerType, providerConfig, diagOptions = {}) {
+        const diagSource = diagOptions.diagSource || 'unspecified';
+        const displayName = this._getDisplayName(providerConfig);
+        const uuidShort = providerConfig.uuid ? providerConfig.uuid.substring(0, 8) : 'no-uuid';
+
         // 确定健康检查使用的模型名称
         const baseProviderType = this._getBaseProviderType(providerType);
         const modelName = providerConfig.checkModelName ||
                         ProviderPoolManager.DEFAULT_HEALTH_CHECK_MODELS[providerType] ||
                         ProviderPoolManager.DEFAULT_HEALTH_CHECK_MODELS[baseProviderType];
 
+        // [HC-DIAG] 入口快照：调用源 / 节点身份 / 当前健康状态 / 账号代理 URL / 模型
+        this._diag(`enter _checkProviderHealth source=${diagSource} type=${providerType} name=${displayName} uuid=${uuidShort} ` +
+            `isHealthy=${providerConfig.isHealthy} isDisabled=${providerConfig.isDisabled} ` +
+            `ACCOUNT_PROXY_URL=${this._redactProxyUrl(providerConfig.ACCOUNT_PROXY_URL || 'none')} ` +
+            `ACCOUNT_PROXY_DISABLED=${providerConfig.ACCOUNT_PROXY_DISABLED === true} ` +
+            `model=${modelName || 'unknown'}`);
+
         if (!modelName) {
             this._log('warn', `Unknown provider type for health check: ${providerType}. Please check DEFAULT_HEALTH_CHECK_MODELS.`);
-            return { 
-                success: false, 
-                modelName: null, 
-                errorMessage: `Unknown provider type '${providerType}'. No default health check model configured.` 
+            return {
+                success: false,
+                modelName: null,
+                errorMessage: `Unknown provider type '${providerType}'. No default health check model configured.`
             };
         }
 
@@ -2310,6 +2402,27 @@ export class ProviderPoolManager {
         delete tempConfig.providerPools;
         const serviceAdapter = getServiceAdapter(tempConfig);
 
+        // [HC-DIAG] adapter 拿到后立即看一眼底层 axios 绑的是哪个代理；
+        // 这是定位 "ACCOUNT_PROXY_URL 改了, 但 axios 还在用老 agent" 的关键证据。
+        try {
+            const innerService = serviceAdapter?.kiroApiService || serviceAdapter?.geminiApiService ||
+                serviceAdapter?.codexApiService || serviceAdapter?.qwenApiService ||
+                serviceAdapter?.iflowApiService || serviceAdapter?.antigravityApiService ||
+                serviceAdapter?.grokApiService || null;
+            if (innerService?.axiosInstance) {
+                const px = this._describeAxiosProxy(innerService.axiosInstance);
+                this._diag(`adapter axios proxy snapshot source=${diagSource} name=${displayName} uuid=${uuidShort} ` +
+                    `httpsProxy=${px.httpsProxy} httpProxy=${px.httpProxy} proxyDisabled=${px.proxyDisabled} ` +
+                    `accessToken=${this._redactToken(innerService.accessToken)} ` +
+                    `expiresAt=${innerService.expiresAt || 'none'} ` +
+                    `isInitialized=${innerService.isInitialized}`);
+            } else {
+                this._diag(`adapter has no introspectable inner service source=${diagSource} adapterClass=${serviceAdapter?.constructor?.name}`);
+            }
+        } catch (e) {
+            this._diag(`adapter introspection failed: ${e.message}`);
+        }
+
         // Pre-probe force-refresh for unhealthy OAuth nodes: if the access_token is dead
         // but the refresh_token is still valid, exchange it before the probe so the node
         // can recover. Static-key providers are excluded by absence of an OAuth creds path.
@@ -2321,19 +2434,45 @@ export class ProviderPoolManager {
             providerConfig.IFLOW_OAUTH_CREDS_FILE_PATH ||
             providerConfig.CODEX_OAUTH_CREDS_FILE_PATH;
 
-        if (!providerConfig.isHealthy && oauthCredsPath) {
+        const willForceRefresh = !providerConfig.isHealthy && !!oauthCredsPath;
+        this._diag(`pre-probe decision source=${diagSource} name=${displayName} willForceRefresh=${willForceRefresh} ` +
+            `(unhealthy=${!providerConfig.isHealthy}, hasOauthCredsPath=${!!oauthCredsPath})`);
+
+        if (willForceRefresh) {
             const uuid = providerConfig.uuid;
             if (this.refreshingUuids.has(uuid)) {
-                this._log('debug', `[HealthCheck] ${this._getDisplayName(providerConfig)} (${providerType}) already refreshing; skipping pre-probe refresh.`);
+                this._diag(`force-refresh skipped (already refreshing) source=${diagSource} name=${displayName} uuid=${uuidShort}`);
+                this._log('debug', `[HealthCheck] ${displayName} (${providerType}) already refreshing; skipping pre-probe refresh.`);
             } else {
                 this.refreshingUuids.add(uuid);
+                const refreshStart = Date.now();
+                this._diag(`force-refresh BEFORE source=${diagSource} name=${displayName} uuid=${uuidShort} type=${providerType}`);
                 try {
-                    this._log('info', `[HealthCheck] Force-refreshing token for unhealthy node ${this._getDisplayName(providerConfig)} (${providerType}) before probe.`);
+                    this._log('info', `[HealthCheck] Force-refreshing token for unhealthy node ${displayName} (${providerType}) before probe.`);
                     await this._awaitRefreshWithTimeout(
                         serviceAdapter.forceRefreshToken(),
                         providerType,
-                        this._getDisplayName(providerConfig)
+                        displayName
                     );
+                    const refreshMs = Date.now() - refreshStart;
+                    // [HC-DIAG] 刷新后再看一次 axios 状态：accessToken 是否变了, agent 是否换了
+                    try {
+                        const innerService = serviceAdapter?.kiroApiService || serviceAdapter?.geminiApiService ||
+                            serviceAdapter?.codexApiService || serviceAdapter?.qwenApiService ||
+                            serviceAdapter?.iflowApiService || serviceAdapter?.antigravityApiService ||
+                            serviceAdapter?.grokApiService || null;
+                        if (innerService?.axiosInstance) {
+                            const px = this._describeAxiosProxy(innerService.axiosInstance);
+                            this._diag(`force-refresh AFTER (ok) source=${diagSource} name=${displayName} ms=${refreshMs} ` +
+                                `httpsProxy=${px.httpsProxy} httpProxy=${px.httpProxy} ` +
+                                `accessToken=${this._redactToken(innerService.accessToken)} ` +
+                                `expiresAt=${innerService.expiresAt || 'none'}`);
+                        } else {
+                            this._diag(`force-refresh AFTER (ok, no introspection) source=${diagSource} name=${displayName} ms=${refreshMs}`);
+                        }
+                    } catch (e) {
+                        this._diag(`force-refresh AFTER introspection failed: ${e.message}`);
+                    }
                     // Bookkeeping intentionally deferred: if the probe below succeeds,
                     // markProviderHealthy() resets refreshCount/lastRefreshTime/etc.
                     // (provider-pool-manager.js:1753-1756). If the probe fails, the
@@ -2341,7 +2480,9 @@ export class ProviderPoolManager {
                     // leaving counters untouched matches the "probe is the source of
                     // truth" model used by performHealthChecks.
                 } catch (err) {
-                    this._log('warn', `[HealthCheck] Force refresh failed for ${this._getDisplayName(providerConfig)} (${providerType}): ${err.message}. Proceeding to probe.`);
+                    const refreshMs = Date.now() - refreshStart;
+                    this._diag(`force-refresh AFTER (FAIL) source=${diagSource} name=${displayName} ms=${refreshMs} error=${err.message}`);
+                    this._log('warn', `[HealthCheck] Force refresh failed for ${displayName} (${providerType}): ${err.message}. Proceeding to probe.`);
                 } finally {
                     this.refreshingUuids.delete(uuid);
                 }
@@ -2361,26 +2502,55 @@ export class ProviderPoolManager {
             const abortController = new AbortController();
             const timeoutId = setTimeout(() => abortController.abort(), healthCheckTimeout);
 
+            // [HC-DIAG] 探测前再快照一次：refresh 之后, axios 真正去打这一发请求时绑的是哪个 agent
+            try {
+                const innerService = serviceAdapter?.kiroApiService || serviceAdapter?.geminiApiService ||
+                    serviceAdapter?.codexApiService || serviceAdapter?.qwenApiService ||
+                    serviceAdapter?.iflowApiService || serviceAdapter?.antigravityApiService ||
+                    serviceAdapter?.grokApiService || null;
+                if (innerService?.axiosInstance) {
+                    const px = this._describeAxiosProxy(innerService.axiosInstance);
+                    this._diag(`probe BEFORE attempt=${i + 1}/${healthCheckRequests.length} source=${diagSource} name=${displayName} ` +
+                        `httpsProxy=${px.httpsProxy} httpProxy=${px.httpProxy} ` +
+                        `accessToken=${this._redactToken(innerService.accessToken)} model=${modelName}`);
+                } else {
+                    this._diag(`probe BEFORE attempt=${i + 1} source=${diagSource} name=${displayName} (no axios introspection) model=${modelName}`);
+                }
+            } catch (e) {
+                this._diag(`probe BEFORE introspection failed: ${e.message}`);
+            }
+
+            const probeStart = Date.now();
             try {
                 // 尝试将 signal 注入请求体，供支持的适配器使用
                 const requestWithSignal = {
                     ...healthCheckRequest,
+                    // 让下游 callApi/_doTokenRefresh 能识别这是诊断请求，便于打 PROBE 标签
+                    __diagSource: diagSource,
+                    __diagIsHealthCheckProbe: true,
                     // signal: abortController.signal
                 };
 
                 await serviceAdapter.generateContent(modelName, requestWithSignal);
-                
+
                 clearTimeout(timeoutId);
+                const probeMs = Date.now() - probeStart;
+                this._diag(`probe AFTER (ok) attempt=${i + 1} source=${diagSource} name=${displayName} ms=${probeMs} model=${modelName}`);
                 // 注意：使用量计数由调用方处理（performHealthChecks/performInitialHealthChecks）
                 // 这里只返回成功结果，让调用方统一处理状态更新和计数
                 return { success: true, modelName, errorMessage: null };
             } catch (error) {
                 clearTimeout(timeoutId);
+                const probeMs = Date.now() - probeStart;
+                const status = error.response?.status;
+                this._diag(`probe AFTER (FAIL) attempt=${i + 1} source=${diagSource} name=${displayName} ms=${probeMs} ` +
+                    `status=${status} code=${error.code || 'none'} message=${(error.message || '').substring(0, 200)}`);
                 lastError = error;
             }
         }
 
         // 所有尝试都失败
+        this._diag(`exit _checkProviderHealth (FAIL) source=${diagSource} name=${displayName} attempts=${healthCheckRequests.length} lastError=${lastError?.message}`);
         this._log('warn', `[HealthCheck] ${providerType} failed after ${healthCheckRequests.length} attempts: ${lastError?.message}`);
         return { success: false, modelName, errorMessage: lastError?.message || 'All health check attempts failed' };
     }

@@ -158,7 +158,7 @@ async function runProviderHealthCheck(providerPoolManager, providerType, provide
         const healthResult = await providerPoolManager._checkProviderHealth(providerType, {
             ...providerConfig,
             checkModelName
-        });
+        }, { diagSource: 'manual-single' });
 
         if (healthResult.success) {
             providerPoolManager.markProviderHealthy(providerType, providerConfig, false, healthResult.modelName);
@@ -1183,12 +1183,13 @@ export async function handleHealthCheck(req, res, currentConfig, providerPoolMan
         }
 
         logger.info(`[UI API] Starting health check for ${unhealthyProviders.length} unhealthy providers in ${providerType} (total: ${providers.length})`);
+        logger.info(`[HC-DIAG] handleHealthCheck ENTER source=manual-batch type=${providerType} unhealthyCount=${unhealthyProviders.length} totalCount=${providers.length} unhealthyUuids=${JSON.stringify(unhealthyProviders.map(ps => (ps.config?.uuid || '').substring(0, 8)))}`);
 
         // 执行健康检测（检查所有未禁用的 unhealthy providers）
         const results = [];
         for (const providerStatus of unhealthyProviders) {
             const providerConfig = providerStatus.config;
-            
+
             // 跳过已禁用的节点
             if (providerConfig.isDisabled) {
                 logger.info(`[UI API] Skipping health check for disabled provider: ${providerConfig.uuid}`);
@@ -1196,7 +1197,7 @@ export async function handleHealthCheck(req, res, currentConfig, providerPoolMan
             }
 
              try {
-                const healthResult = await providerPoolManager._checkProviderHealth(providerType, providerConfig);
+                const healthResult = await providerPoolManager._checkProviderHealth(providerType, providerConfig, { diagSource: 'manual-batch' });
                 
                 if (healthResult.success) {
                     providerPoolManager.markProviderHealthy(providerType, providerConfig, false, healthResult.modelName);
@@ -1331,6 +1332,8 @@ export async function handleSingleProviderHealthCheck(req, res, currentConfig, p
         }
 
         logger.info(`[UI API] Starting single health check for provider ${providerUuid} in ${providerType}`);
+        logger.info(`[HC-DIAG] handleSingleProviderHealthCheck ENTER source=manual-single type=${providerType} uuid=${(providerUuid || '').substring(0, 8)} ` +
+            `customName=${providerStatus.config?.customName || 'none'} isHealthy=${providerStatus.config?.isHealthy} isDisabled=${providerStatus.config?.isDisabled}`);
 
         const result = await runProviderHealthCheck(providerPoolManager, providerType, providerStatus);
 

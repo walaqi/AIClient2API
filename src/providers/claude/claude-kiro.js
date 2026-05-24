@@ -23,6 +23,55 @@ import { calculateCacheTokens } from '../../utils/model-pricing.js';
 import { parseAwsEventStreamFrames as awsParseEventStreamFrames } from './aws-event-stream-parser.js';
 import { isIncompleteFileToolCall } from './kiro-tool-validators.js';
 
+// ===== [HC-DIAG] 健康检查链路诊断辅助函数 (临时, 用于诊断 403/proxy 轮换问题) =====
+function _hcRedactToken(token) {
+    if (!token || typeof token !== 'string') return 'none';
+    if (token.length <= 8) return `len=${token.length}`;
+    return `${token.substring(0, 4)}...${token.substring(token.length - 4)} len=${token.length}`;
+}
+
+function _hcRedactProxyUrl(url) {
+    if (!url || typeof url !== 'string') return 'none';
+    try {
+        const u = new URL(url);
+        const auth = u.username ? `${u.username.substring(0, 4)}***@` : '';
+        return `${u.protocol}//${auth}${u.hostname}:${u.port || '(default)'}${u.pathname || ''}`;
+    } catch {
+        return url.length > 60 ? `${url.substring(0, 60)}...` : url;
+    }
+}
+
+function _hcDescribeAxiosProxy(axiosInstance) {
+    if (!axiosInstance || !axiosInstance.defaults) return 'no-axios';
+    const d = axiosInstance.defaults;
+    const pick = (agent) => {
+        if (!agent) return null;
+        const candidates = [
+            agent.proxy,
+            agent.options && agent.options.proxy,
+            agent.connectOpts,
+            agent.proxyUri,
+        ];
+        for (const c of candidates) {
+            if (!c) continue;
+            if (typeof c === 'string') return c;
+            if (typeof c === 'object') {
+                if (c.href) return c.href;
+                if (c.host && c.port) {
+                    const proto = c.protocol || 'http:';
+                    const auth = c.username ? `${c.username}@` : (c.auth ? `${c.auth}@` : '');
+                    return `${proto}//${auth}${c.host}:${c.port}`;
+                }
+            }
+        }
+        return null;
+    };
+    const httpsP = pick(d.httpsAgent);
+    const httpP = pick(d.httpAgent);
+    return `httpsProxy=${_hcRedactProxyUrl(httpsP)} httpProxy=${_hcRedactProxyUrl(httpP)} axiosProxy=${d.proxy ? JSON.stringify(d.proxy) : 'disabled'}`;
+}
+// ===== [HC-DIAG] end =====
+
 const KIRO_THINKING = {
     MIN_BUDGET_TOKENS: 1024,
     MAX_BUDGET_TOKENS: 1024*8,
@@ -1638,6 +1687,10 @@ async saveCredentialsToFile(filePath, newData) {
      * @param {string} tokenFilePath - 凭证文件路径
      */
     async _doTokenRefresh(saveCredentialsToFile, tokenFilePath) {
+        const _diagTag = `[HC-DIAG][Kiro:_doTokenRefresh][${this._nodeName}]`;
+        const _diagStartMs = Date.now();
+        const _diagOldAccessToken = this.accessToken;
+        const _diagOldExpiresAt = this.expiresAt;
         try {
             const requestBody = {
                 refreshToken: this.refreshToken,
@@ -1662,10 +1715,21 @@ async saveCredentialsToFile(filePath, newData) {
                 requestBody.grantType = 'refresh_token';
             }
 
+            const _axiosToUse = isSocialAuth ? this.axiosSocialRefreshInstance : this.axiosInstance;
+            logger.info(`${_diagTag} START isSocialAuth=${isSocialAuth} authMethod=${this.authMethod} ` +
+                `refreshUrl=${refreshUrl} ` +
+                `axiosInstance=${isSocialAuth ? 'axiosSocialRefreshInstance' : 'axiosInstance'} ` +
+                `refreshToken=${_hcRedactToken(this.refreshToken)} ` +
+                `oldAccessToken=${_hcRedactToken(_diagOldAccessToken)} ` +
+                `oldExpiresAt=${_diagOldExpiresAt || 'none'} ` +
+                `proxy={${_hcDescribeAxiosProxy(_axiosToUse)}} ` +
+                `accountProxyUrl=${_hcRedactProxyUrl(this.config?.ACCOUNT_PROXY_URL)} ` +
+                `accountProxyDisabled=${!!this.config?.ACCOUNT_PROXY_DISABLED}`);
+
             let response = null;
             // 使用更短的超时时间进行 token 刷新，避免阻塞其他请求
             const refreshConfig = { timeout: KIRO_CONSTANTS.TOKEN_REFRESH_TIMEOUT };
-            
+
             const axiosConfig = {
                 method: 'post',
                 url: refreshUrl,
@@ -1690,6 +1754,10 @@ async saveCredentialsToFile(filePath, newData) {
                 const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
                 this.expiresAt = expiresAt;
                 logger.info('[Kiro Auth] Access token refreshed successfully');
+                logger.info(`${_diagTag} END ok=true status=${response.status} elapsedMs=${Date.now() - _diagStartMs} ` +
+                    `newAccessToken=${_hcRedactToken(this.accessToken)} ` +
+                    `tokenChanged=${_diagOldAccessToken !== this.accessToken} ` +
+                    `newExpiresAt=${expiresAt} expiresInSec=${expiresIn}`);
 
                 const updatedTokenData = {
                     accessToken: this.accessToken,
@@ -1710,7 +1778,11 @@ async saveCredentialsToFile(filePath, newData) {
                 throw new Error('Invalid refresh response: Missing accessToken');
             }
         } catch (error) {
+            const _status = error?.response?.status;
+            const _code = error?.code;
             logger.error('[Kiro Auth] Token refresh failed:', error.message);
+            logger.info(`${_diagTag} END ok=false elapsedMs=${Date.now() - _diagStartMs} ` +
+                `status=${_status || 'none'} code=${_code || 'none'} message=${(error.message || '').substring(0, 200)}`);
             throw new Error(`Token refresh failed: ${error.message}`);
         }
     }
@@ -2472,6 +2544,18 @@ async saveCredentialsToFile(filePath, newData) {
         const maxRetries = this.config.REQUEST_MAX_RETRIES || 3;
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
+        // [HC-DIAG] 健康检查探测请求标记 (临时)
+        const _diagIsProbe = body && body.__diagIsHealthCheckProbe === true;
+        const _diagSource = body && body.__diagSource ? body.__diagSource : null;
+        if (_diagIsProbe) {
+            logger.info(`[HC-DIAG][Kiro:callApi][${this._nodeName}] PROBE REQUEST ENTER source=${_diagSource} ` +
+                `model=${model} uuid=${(this.uuid || '').substring(0, 8)} ` +
+                `accessToken=${_hcRedactToken(this.accessToken)} expiresAt=${this.expiresAt || 'none'} ` +
+                `proxy={${_hcDescribeAxiosProxy(this.axiosInstance)}} ` +
+                `accountProxyUrl=${_hcRedactProxyUrl(this.config?.ACCOUNT_PROXY_URL)} ` +
+                `accountProxyDisabled=${!!this.config?.ACCOUNT_PROXY_DISABLED}`);
+        }
+
         // 处理不同格式的请求体（messages 或 contents）
         let messages = body.messages;
         if (!messages && body.contents) {
@@ -2516,13 +2600,28 @@ async saveCredentialsToFile(filePath, newData) {
                     };
                     logger.debug(`[Kiro] outbound headers (callApi) endpoint=${endpoint.name}: perRequest=${JSON.stringify(axiosConfig.headers)} instanceDefaults=${JSON.stringify(this.axiosInstance?.defaults?.headers?.common || {})} instanceDefaultsPost=${JSON.stringify(this.axiosInstance?.defaults?.headers?.post || {})}`);
                     this._applySidecar(axiosConfig);
+                    if (_diagIsProbe) {
+                        logger.info(`[HC-DIAG][Kiro:callApi][${this._nodeName}] PROBE BEFORE axios.request endpoint=${endpoint.name} url=${endpoint.url} ` +
+                            `proxy={${_hcDescribeAxiosProxy(this.axiosInstance)}} ` +
+                            `accessToken=${_hcRedactToken(this.accessToken)}`);
+                    }
+                    const _diagReqStart = _diagIsProbe ? Date.now() : 0;
                     try {
                         response = await this.axiosInstance.request(axiosConfig);
+                        if (_diagIsProbe) {
+                            logger.info(`[HC-DIAG][Kiro:callApi][${this._nodeName}] PROBE AFTER ok=true endpoint=${endpoint.name} ` +
+                                `status=${response?.status} elapsedMs=${Date.now() - _diagReqStart}`);
+                        }
                         if (i > 0) {
                             logger.info(`[Kiro][${this._nodeName}] Endpoint ${endpoint.name} succeeded after fallback from earlier 429.`);
                         }
                         break;
                     } catch (err) {
+                        if (_diagIsProbe) {
+                            logger.info(`[HC-DIAG][Kiro:callApi][${this._nodeName}] PROBE AFTER ok=false endpoint=${endpoint.name} ` +
+                                `status=${err?.response?.status || 'none'} code=${err?.code || 'none'} ` +
+                                `elapsedMs=${Date.now() - _diagReqStart} message=${(err?.message || '').substring(0, 200)}`);
+                        }
                         const st = err.response?.status;
                         if (st === 429 && !isLastEndpoint) {
                             const nextEp = endpoints[i + 1];
