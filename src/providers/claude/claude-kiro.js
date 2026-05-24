@@ -1637,7 +1637,7 @@ async saveCredentialsToFile(filePath, newData) {
      * @param {Function} saveCredentialsToFile - 保存凭证的函数
      * @param {string} tokenFilePath - 凭证文件路径
      */
-    async _doTokenRefresh(saveCredentialsToFile, tokenFilePath) {
+    async _doTokenRefresh(saveCredentialsToFile, tokenFilePath, _retryOn502 = true) {
         try {
             const requestBody = {
                 refreshToken: this.refreshToken,
@@ -1665,7 +1665,7 @@ async saveCredentialsToFile(filePath, newData) {
             let response = null;
             // 使用更短的超时时间进行 token 刷新，避免阻塞其他请求
             const refreshConfig = { timeout: KIRO_CONSTANTS.TOKEN_REFRESH_TIMEOUT };
-            
+
             const axiosConfig = {
                 method: 'post',
                 url: refreshUrl,
@@ -1674,12 +1674,26 @@ async saveCredentialsToFile(filePath, newData) {
             };
             this._applySidecar(axiosConfig);
 
-            if (isSocialAuth) {
-                response = await this.axiosSocialRefreshInstance.request(axiosConfig);
-                logger.info('[Kiro Auth] Token refresh social response: ok');
-            } else {
-                response = await this.axiosInstance.request(axiosConfig);
-                logger.info('[Kiro Auth] Token refresh idc response: ok');
+            try {
+                if (isSocialAuth) {
+                    response = await this.axiosSocialRefreshInstance.request(axiosConfig);
+                    logger.info('[Kiro Auth] Token refresh social response: ok');
+                } else {
+                    response = await this.axiosInstance.request(axiosConfig);
+                    logger.info('[Kiro Auth] Token refresh idc response: ok');
+                }
+            } catch (refreshErr) {
+                if (_retryOn502 && refreshErr?.response?.status === 502) {
+                    const proxyUrl = this.config.ACCOUNT_PROXY_URL;
+                    if (proxyUrl && this.config.ACCOUNT_PROXY_DISABLED !== true) {
+                        const rotated = this._rotateProxySession(proxyUrl);
+                        if (rotated && this._applyProxyToInstances(rotated)) {
+                            logger.warn(`[Kiro Auth][${this._nodeName}] refresh 502 from proxy, rotated session and retrying once: ${rotated.substring(rotated.indexOf('session-'), rotated.indexOf('-sessionduration') + 16)}`);
+                            return await this._doTokenRefresh(saveCredentialsToFile, tokenFilePath, false);
+                        }
+                    }
+                }
+                throw refreshErr;
             }
 
             if (response.data && response.data.accessToken) {
@@ -2679,6 +2693,32 @@ async saveCredentialsToFile(filePath, newData) {
         return proxyUrl.replace(regex, `session-${s}-sessionduration`);
     }
 
+    _applyProxyToInstances(proxyUrl) {
+        const pc = parseProxyUrl(proxyUrl);
+        if (!pc) return false;
+
+        this.config.ACCOUNT_PROXY_URL = proxyUrl;
+
+        if (this.axiosInstance) {
+            this.axiosInstance.defaults.httpAgent = pc.httpsAgent;
+            this.axiosInstance.defaults.httpsAgent = pc.httpsAgent;
+        }
+        if (this.axiosSocialRefreshInstance) {
+            this.axiosSocialRefreshInstance.defaults.httpAgent = pc.httpsAgent;
+            this.axiosSocialRefreshInstance.defaults.httpsAgent = pc.httpsAgent;
+        }
+
+        try {
+            const poolManager = getProviderPoolManager();
+            if (poolManager) {
+                poolManager._debouncedSave(this.config.MODEL_PROVIDER || MODEL_PROVIDER.KIRO_API);
+            }
+        } catch (e) {
+            logger.debug(`[Kiro][${this._nodeName}] _applyProxyToInstances persist skipped: ${e.message}`);
+        }
+        return true;
+    }
+
     _tryRotateProxyAndRetryOn502(error, method, model, body, isRetry, retryCount, isStream = false) {
         const status = error.response?.status;
         if (status !== 502) return null;
@@ -2687,12 +2727,7 @@ async saveCredentialsToFile(filePath, newData) {
         const rotated = this._rotateProxySession(proxyUrl);
         if (!rotated) return null;
 
-        this.config.ACCOUNT_PROXY_URL = rotated;
-        const pc = parseProxyUrl(rotated);
-        if (!pc) return null;
-
-        this.axiosInstance.defaults.httpAgent = pc.httpsAgent;
-        this.axiosInstance.defaults.httpsAgent = pc.httpsAgent;
+        if (!this._applyProxyToInstances(rotated)) return null;
         logger.warn(`[Kiro][${this._nodeName}] 502 from proxy, rotated session: ${rotated.substring(rotated.indexOf('session-'), rotated.indexOf('-sessionduration') + 16)}`);
 
         if (isStream) {

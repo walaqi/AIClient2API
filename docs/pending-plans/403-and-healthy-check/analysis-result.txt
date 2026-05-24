@@ -1,0 +1,86 @@
+# Health-Check 403 / 502 / 429 诊断结论
+
+来源日志: logs/log-grepped-20260524-20-52-16.log（812 行，覆盖约 11:50:06 ~ 12:42:44，5 个调度周期 + 4 次 manual-single）
+分支: diag/health-check-403-trace
+诊断范围: 8 个 Kiro 账号（kiro-1 ~ kiro-8）的健康检查链路
+
+================================================================
+一、各账号在 5 个调度周期内的表现
+================================================================
+
+| 账号    | ACCOUNT_PROXY_URL 形态                       | refresh 结果        | probe 结果        | 备注                                                  |
+|---------|---------------------------------------------|---------------------|-------------------|------------------------------------------------------|
+| kiro-1  | session-XXX-1440（随机名）                   | 间歇 502 / 偶尔 200 | 多次 403 / 偶尔 429 | line 445 一次 OK；line 707/786 fresh token 仍 429    |
+| kiro-2  | 直连（无代理）                               | 全部 200            | 全部 200          | 基线对照组                                            |
+| kiro-3  | session-xenxje-1440                         | 全部 502            | 全部 403          | access token 全程冻结在 aoaA…6lCw                    |
+| kiro-4  | session-XXX-1440（随机名）                   | 间歇 502 / 间歇 200 | 间歇 403 / 间歇 200 | line 481/566/651 交替                                |
+| kiro-5  | session-XXX-1440（随机名）                   | 间歇 502 / 间歇 200 | 间歇 403 / 间歇 200 | line 496/584/665/751 交替                            |
+| kiro-6  | session-kiro66-sessionduration-1440         | 全部 200            | 全部 200          | 命名 session 稳定                                    |
+| kiro-7  | manual-single 改为 session-kiro77-1440 后    | 改名后 200          | 改名后 200        | line 424 即时验证：改名即恢复                        |
+| kiro-8  | session-rllxuz-sessionduration-60           | 全部 200            | 全部 200          | -60 时长 session 稳定                                |
+
+================================================================
+二、根因（按因果链排列）
+================================================================
+
+### 1. Refresh-502 —— 某些 Decodo sticky session 对 Cognito refresh endpoint 持续 502
+- 现象: 通过 `session-{随机名}-sessionduration-1440` 访问
+  `https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken` 一直返回 502。
+- 反例: `kiro66-1440`、`kiro77-1440`（自定义名）和 `rllxuz-60`（短时长）全程 200。
+- 推断: 不是 Decodo 整体被 Kiro 屏蔽，而是特定 sticky-session 路由出去的 IP/上游
+  对 Kiro Cognito 不可达，命名规则 + 时长共同决定结果。
+
+### 2. Stale-token-403 —— refresh 失败后探测仍发出
+- 现象: refresh 502 后 `_doTokenRefresh` 抛错，但 `_checkProviderHealth` 后续仍带
+  老 access token 调 CodeWhisperer，返回 403。
+- 例证: kiro-3 在整个 log 中 access token 始终是 `aoaA…6lCw`，5 个周期 5 次 403。
+- 结论: 403 是上游 502 的下游症状，不是独立的 IP 封禁。
+
+### 3. 旋转策略不对称 —— 只对 probe-502 旋转，对 refresh-502 不旋转
+- `_tryRotateProxyAndRetryOn502` 仅在 CodeWhisperer/AmazonQ 探测 502 时触发
+  （line 471/528/572/808 可见 `xenxje → hnuvem → kiro33` 这种轮换）。
+- refresh 路径 502 时没有任何旋转逻辑，于是同一个死 session 名继续刷 5 次都失败。
+
+### 4. Skip-while-refreshing 竞态 —— pool dedup 让 probe 跳过 refresh 直接用旧 token
+- 例证: line 795（12:42:25 kiro-3）与 line 806（12:42:43 kiro-3）出现
+  `force-refresh skipped (already refreshing)`，紧接着 probe 用 `aoaA…6lCw`
+  这个早已过期的 token 直接发请求，得到 403。
+- 问题: dedup 路径既不 await in-flight refresh promise，也不直接拒绝探测，而是
+  默默放行旧 token，制造了「明明在刷新，但探测照样用旧 token」的假阳性 403。
+
+### 5. 三处 proxy 状态漂移（同一账号内代理 URL 不一致）
+- 例证: kiro-3 line 549 同一时刻三个值不同
+  - ACCOUNT_PROXY_URL = `…nkvwu-1440`
+  - adapter.axiosInstance.proxy = `…hnuvem-1440`
+  - refresh axios (axiosSocialRefreshInstance).proxy = `…xenxje-1440`
+- 含义: probe 旋转更新了 adapter 的 axios，但没回写 ACCOUNT_PROXY_URL，也没同步
+  到 refresh 的 axios；下次 refresh 仍用最早的死 session，永远刷不出来。
+
+================================================================
+三、独立信号: 429（与 403/502 根因不同）
+================================================================
+
+- 例证: line 707（12:33:38 kiro-1）和 line 786（12:42:04 kiro-1）
+  - access token 是新鲜的 `expiresAt=2026-05-24T13:03:39`（refresh 200 通过）
+  - 代理 alive
+  - CodeWhisperer 与 AmazonQ 双双 429
+- 结论: 这是账号配额/速率限制，与代理或 token 无关，必须走 cooldown，不能当 403 处理。
+
+================================================================
+四、修复优先级
+================================================================
+
+| 优先级 | 修复项                                                                       | 影响                                            |
+|--------|-----------------------------------------------------------------------------|-------------------------------------------------|
+| P0     | refresh-502 也走 `_tryRotateProxyAndRetryOn502`（refresh 端旋转代理）           | 直接解决 kiro-3 整轮 5/5 失败                   |
+| P0     | `force-refresh skipped (already refreshing)` 改为 await 进行中的 refresh promise | 消除 stale-token 竞态导致的假 403               |
+| P1     | 收敛 ACCOUNT_PROXY_URL / adapter.axios / refresh.axios 为单一 source of truth   | 避免三向漂移，旋转结果对所有路径生效            |
+| P1     | session 命名策略：用 `kiroXX` 命名或缩短为 -60，避免随机 -1440                  | 直接降低 502 命中率（kiro-7 改名即恢复已验证）  |
+| P2     | 区分 403/429/502 处理：403→刷 token，429→cooldown，502→旋转代理                  | 防止把 429 当 403 反复 refresh，反而触发更多限流 |
+
+================================================================
+五、要先做 P0 这两条吗？
+================================================================
+
+P0-1 与 P0-2 互相独立，可以并行实现，落地后再跑一轮 5 周期 + manual-single 复测，
+对照本次 log 即可量化效果。

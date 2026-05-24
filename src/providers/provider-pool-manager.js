@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import { getServiceAdapter, getRegisteredProviders, invalidateServiceAdapter } from './adapter.js';
 import logger from '../utils/logger.js';
-import { MODEL_PROVIDER, getProtocolPrefix } from '../utils/common.js';
+import { MODEL_PROVIDER, getProtocolPrefix, getRateLimitCooldownRecoveryTime, getRetryAfterMs } from '../utils/common.js';
 import { withFileLock, atomicWriteFile } from '../utils/file-lock.js';
 import { convertData } from '../convert/convert.js';
 
@@ -103,6 +103,7 @@ export class ProviderPoolManager {
         
         this.warmupTarget = options.globalConfig?.WARMUP_TARGET || 0; // 默认预热0个节点
         this.refreshingUuids = new Set(); // 正在刷新的节点 UUID 集合
+        this.refreshPromises = new Map(); // uuid -> in-flight refresh Promise（供 probe 端 await dedup）
         
         this.refreshQueues = {}; // 按 providerType 分组的队列
         // 缓冲队列机制：延迟5秒，去重后再执行刷新
@@ -335,7 +336,7 @@ export class ProviderPoolManager {
      */
     _enqueueRefreshImmediate(providerType, providerStatus, force = false) {
         const uuid = providerStatus.uuid;
-        
+
         // 再次检查是否已经在刷新中（防止并发问题）
         if (this.refreshingUuids.has(uuid)) {
             this._log('debug', `Node ${this._getDisplayName(providerStatus.config)} is already in refresh queue (immediate check).`);
@@ -343,6 +344,17 @@ export class ProviderPoolManager {
         }
 
         this.refreshingUuids.add(uuid);
+
+        // 在入队即创建一个 deferred promise，让 probe 端的 dedup 路径可以 await
+        // 真实刷新完成或失败（哪怕任务还在队列里等待执行也能拿到一个 pending promise）
+        let _resolveInflight, _rejectInflight;
+        const inflightPromise = new Promise((res, rej) => {
+            _resolveInflight = res;
+            _rejectInflight = rej;
+        });
+        // 防止无 awaiter 时变成 unhandled rejection
+        inflightPromise.catch(() => {});
+        this.refreshPromises.set(uuid, inflightPromise);
 
         // 初始化提供商队列
         if (!this.refreshQueues[providerType]) {
@@ -358,11 +370,14 @@ export class ProviderPoolManager {
 
         const runTask = async () => {
             try {
-                await this._refreshNodeToken(providerType, providerStatus, force);
+                const result = await this._refreshNodeToken(providerType, providerStatus, force);
+                _resolveInflight(result);
             } catch (err) {
                 this._log('error', `Failed to process refresh for node ${this._getDisplayName(providerStatus.config)}: ${err.message}`);
+                _rejectInflight(err);
             } finally {
                 this.refreshingUuids.delete(uuid);
+                this.refreshPromises.delete(uuid);
 
                 // 再次获取当前队列引用
                 const currentQueue = this.refreshQueues[providerType];
@@ -1797,6 +1812,59 @@ export class ProviderPoolManager {
     }
 
     /**
+     * 健康检查路径专用：根据失败结果（_checkProviderHealth 返回值）决定是普通 unhealthy
+     * 还是 429 cooldown（带 scheduledRecoveryTime）。返回 true 表示已按 429 处理。
+     * @param {string} providerType
+     * @param {object} providerConfig
+     * @param {object} healthResult { errorObject, status, errorMessage, retryAfterMs }
+     * @returns {boolean} isRateLimited
+     */
+    _applyHealthCheckFailure(providerType, providerConfig, healthResult, opts = {}) {
+        const immediate = opts.immediate === true;
+        const status = Number(healthResult?.status || healthResult?.errorObject?.response?.status || 0);
+        const errMsg = healthResult?.errorMessage || '';
+        const looksLike429 = status === 429
+            || /\b429\b/.test(errMsg)
+            || /Too\s*Many\s*Requests/i.test(errMsg)
+            || /Throttling/i.test(errMsg);
+
+        if (!looksLike429) {
+            if (immediate) {
+                this.markProviderUnhealthyImmediately(providerType, providerConfig, healthResult?.errorMessage);
+            } else {
+                this.markProviderUnhealthy(providerType, providerConfig, healthResult?.errorMessage);
+            }
+            return false;
+        }
+
+        // 优先用真实 error 计算 cooldown；没有 errorObject 时合成一个最小载荷
+        const errorForCooldown = healthResult?.errorObject || {
+            response: { status: 429, headers: {} },
+            retryAfterMs: healthResult?.retryAfterMs ?? null,
+            message: errMsg,
+        };
+        let recoveryTime = getRateLimitCooldownRecoveryTime(errorForCooldown, this.globalConfig);
+        if (!recoveryTime) {
+            // RATE_LIMIT_COOLDOWN_ENABLED 关闭时也给一个保底 cooldown，避免下个调度周期立刻又探测
+            const fallbackMs = Number(this.globalConfig?.RATE_LIMIT_COOLDOWN_MS) > 0
+                ? Number(this.globalConfig.RATE_LIMIT_COOLDOWN_MS)
+                : 30000;
+            const retryAfterMs = healthResult?.retryAfterMs
+                || getRetryAfterMs(errorForCooldown)
+                || fallbackMs;
+            recoveryTime = new Date(Date.now() + retryAfterMs);
+        }
+
+        const reason = errMsg
+            ? `429 Too Many Requests (health-check) - ${errMsg.substring(0, 200)}`
+            : '429 Too Many Requests - health-check rate limit cooldown';
+        this.markProviderUnhealthyWithRecoveryTime(providerType, providerConfig, reason, recoveryTime);
+        this.record429Hit(providerType, providerConfig.uuid);
+        this._log('info', `[HealthCheck] ${this._getDisplayName(providerConfig)} (${providerType}) rate-limited; cooldown until ${recoveryTime.toISOString()}.`);
+        return true;
+    }
+
+    /**
      * 重置提供商的刷新状态（needsRefresh 和 refreshCount）
      * 并将其标记为健康，以便立即投入使用
      * @param {string} providerType - 提供商类型
@@ -2072,8 +2140,8 @@ export class ProviderPoolManager {
                     } else {
                         // Provider is not healthy
                         this._log('warn', `Health check for ${this._getDisplayName(providerConfig)} (${providerType}) failed: ${healthResult.errorMessage || 'Provider is not responding correctly.'}`);
-                        this.markProviderUnhealthy(providerType, providerConfig, healthResult.errorMessage);
-                        
+                        this._applyHealthCheckFailure(providerType, providerConfig, healthResult);
+
                         // 更新健康检测时间和模型（即使失败也记录）
                         providerStatus.config.lastHealthCheckTime = new Date().toISOString();
                         if (healthResult.modelName) {
@@ -2170,7 +2238,7 @@ export class ProviderPoolManager {
                     // Provider is unhealthy
                     failCount++;
                     this._log('warn', `[ScheduledHealthCheck] ${displayName} (${providerType}) FAILED: ${result.errorMessage || 'Provider is not responding correctly.'} (${checkDuration}ms)`);
-                    this.markProviderUnhealthyImmediately(providerType, provider.config, result.errorMessage);
+                    this._applyHealthCheckFailure(providerType, provider.config, result, { immediate: true });
                 } else {
                     // Provider is healthy
                     successCount++;
@@ -2324,7 +2392,24 @@ export class ProviderPoolManager {
         if (!providerConfig.isHealthy && oauthCredsPath) {
             const uuid = providerConfig.uuid;
             if (this.refreshingUuids.has(uuid)) {
-                this._log('debug', `[HealthCheck] ${this._getDisplayName(providerConfig)} (${providerType}) already refreshing; skipping pre-probe refresh.`);
+                // dedup：不再静默放行旧 token，而是 await in-flight refresh，
+                // 把假 403（stale-token）从 probe 路径上消除。失败时降级为继续 probe（保持
+                // "probe is the source of truth"）。
+                const inflight = this.refreshPromises.get(uuid);
+                if (inflight) {
+                    this._log('info', `[HealthCheck] ${this._getDisplayName(providerConfig)} (${providerType}) refresh in-flight; awaiting before probe.`);
+                    try {
+                        await this._awaitRefreshWithTimeout(
+                            inflight,
+                            providerType,
+                            this._getDisplayName(providerConfig)
+                        );
+                    } catch (err) {
+                        this._log('warn', `[HealthCheck] In-flight refresh await failed for ${this._getDisplayName(providerConfig)} (${providerType}): ${err.message}. Proceeding to probe.`);
+                    }
+                } else {
+                    this._log('info', `[HealthCheck] ${this._getDisplayName(providerConfig)} (${providerType}) marked refreshing but no in-flight promise; proceeding to probe.`);
+                }
             } else {
                 this.refreshingUuids.add(uuid);
                 try {
@@ -2382,7 +2467,17 @@ export class ProviderPoolManager {
 
         // 所有尝试都失败
         this._log('warn', `[HealthCheck] ${providerType} failed after ${healthCheckRequests.length} attempts: ${lastError?.message}`);
-        return { success: false, modelName, errorMessage: lastError?.message || 'All health check attempts failed' };
+        // 透传完整 error，让上游能拿到 status / retryAfterMs（特别是 429 cooldown 场景）
+        const status = lastError?.response?.status || lastError?.status || null;
+        const retryAfterMs = lastError?.retryAfterMs ?? null;
+        return {
+            success: false,
+            modelName,
+            errorMessage: lastError?.message || 'All health check attempts failed',
+            errorObject: lastError || null,
+            status,
+            retryAfterMs,
+        };
     }
 
     _rotateProxySession(proxyUrl) {

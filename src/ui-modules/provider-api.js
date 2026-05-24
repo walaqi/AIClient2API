@@ -138,6 +138,14 @@ function isAuthHealthCheckError(errorMessage = '') {
         /\b(Unauthorized|Forbidden|AccessDenied|InvalidToken|ExpiredToken)\b/i.test(errorMessage);
 }
 
+function isRateLimitedHealthCheckError(errorMessage = '', status = 0) {
+    if (Number(status) === 429) return true;
+    if (!errorMessage) return false;
+    return /\b429\b/.test(errorMessage)
+        || /Too\s*Many\s*Requests/i.test(errorMessage)
+        || /Throttling/i.test(errorMessage);
+}
+
 async function runProviderHealthCheck(providerPoolManager, providerType, providerStatus) {
     const providerConfig = providerStatus.config;
 
@@ -173,8 +181,17 @@ async function runProviderHealthCheck(providerPoolManager, providerType, provide
 
         const errorMessage = healthResult.errorMessage || 'Check failed';
         const isAuthError = isAuthHealthCheckError(errorMessage);
+        const isRateLimited = isRateLimitedHealthCheckError(errorMessage, healthResult.status);
 
-        if (isAuthError) {
+        if (isRateLimited) {
+            // 429 走 cooldown，避免下个调度周期立刻又探测；优先调用 pool manager 内的统一处理
+            if (typeof providerPoolManager._applyHealthCheckFailure === 'function') {
+                providerPoolManager._applyHealthCheckFailure(providerType, providerConfig, healthResult, { immediate: true });
+            } else {
+                providerPoolManager.markProviderUnhealthyImmediately(providerType, providerConfig, errorMessage);
+            }
+            logger.info(`[UI API] Rate-limit (429) detected for ${providerConfig.uuid}; cooldown applied.`);
+        } else if (isAuthError) {
             providerPoolManager.markProviderUnhealthyImmediately(providerType, providerConfig, errorMessage);
             logger.info(`[UI API] Auth error detected for ${providerConfig.uuid}, immediately marked as unhealthy`);
         } else {
@@ -192,13 +209,27 @@ async function runProviderHealthCheck(providerPoolManager, providerType, provide
             healthy: false,
             modelName: healthResult.modelName,
             message: errorMessage,
-            isAuthError
+            isAuthError,
+            isRateLimited
         };
     } catch (error) {
         const errorMessage = error.message || 'Unknown error';
         const isAuthError = isAuthHealthCheckError(errorMessage);
+        const isRateLimited = isRateLimitedHealthCheckError(errorMessage, error?.response?.status);
 
-        if (isAuthError) {
+        if (isRateLimited) {
+            if (typeof providerPoolManager._applyHealthCheckFailure === 'function') {
+                providerPoolManager._applyHealthCheckFailure(providerType, providerConfig, {
+                    errorMessage,
+                    errorObject: error,
+                    status: error?.response?.status || null,
+                    retryAfterMs: error?.retryAfterMs ?? null,
+                }, { immediate: true });
+            } else {
+                providerPoolManager.markProviderUnhealthyImmediately(providerType, providerConfig, errorMessage);
+            }
+            logger.info(`[UI API] Rate-limit (429) detected for ${providerConfig.uuid}; cooldown applied (exception path).`);
+        } else if (isAuthError) {
             providerPoolManager.markProviderUnhealthyImmediately(providerType, providerConfig, errorMessage);
             logger.info(`[UI API] Auth error detected for ${providerConfig.uuid}, immediately marked as unhealthy`);
         } else {
@@ -212,7 +243,8 @@ async function runProviderHealthCheck(providerPoolManager, providerType, provide
             success: false,
             healthy: false,
             message: errorMessage,
-            isAuthError
+            isAuthError,
+            isRateLimited
         };
     }
 }
