@@ -585,7 +585,7 @@ export function isAuthorized(req, requestUrl, REQUIRED_API_KEY) {
 export async function handleUnifiedResponse(res, responsePayload, isStream, statusCode = 200) {
     const validatedStatusCode = ensureValidStatusCode(statusCode);
     if (isStream) {
-        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "Transfer-Encoding": "chunked" });
+        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive", "Transfer-Encoding": "chunked", "X-Accel-Buffering": "no" });
     } else {
         res.writeHead(validatedStatusCode, { 'Content-Type': 'application/json' });
     }
@@ -643,6 +643,35 @@ export async function handleStreamRequest(res, service, model, requestBody, from
     if (!isRetry) {
         await handleUnifiedResponse(res, '', true);
     }
+
+    // SSE keep-alive: 等待 service.generateContentStream 首字节期间写注释行,
+    // 防止 Cloudflare/Cloudfront/ALB/Nginx 等中间代理因 N 秒无字节而 RST
+    // (典型 524 / ECONNRESET)。注释行以 `:` 开头, 客户端按 SSE 规范忽略,
+    // 也不触发 anyDataSent (axios 抛错时仍可切凭证重试)。
+    //
+    // 重要: 此代码块必须放在 `if (!isRetry)` 块之外。重试递归 (currentRetry > 0)
+    // 时 isRetry=true, 跳过 handleUnifiedResponse 但仍需启动新 timer, 否则重试
+    // 期间又会 524。
+    const rawInterval = Number(retryContext?.CONFIG?.STREAM_KEEPALIVE_INTERVAL_MS);
+    const keepaliveIntervalMs = Math.max(5000, Number.isFinite(rawInterval) && rawInterval > 0 ? rawInterval : 25000);
+    let keepaliveStopped = false;
+    const stopKeepalive = () => {
+        if (!keepaliveStopped) {
+            clearInterval(keepaliveTimer);
+            keepaliveStopped = true;
+        }
+    };
+    const keepaliveTimer = setInterval(() => {
+        if (keepaliveStopped || res.writableEnded || res.destroyed) {
+            stopKeepalive();
+            return;
+        }
+        try {
+            res.write(`: ka ${Date.now()}\n\n`);
+        } catch (e) {
+            stopKeepalive();
+        }
+    }, keepaliveIntervalMs);
 
     let hasToolCall = false;
     let hasMessageStop = false; // 跟踪是否已经发送过结束标志（message_stop / done）
@@ -752,6 +781,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                     // fullResponseJson += chunk.type+"\n";
                     if (!clientDisconnected.value && !res.writableEnded) {
                         try {
+                            stopKeepalive();
                             res.write(`event: ${chunk.type}\n`);
                             anyDataSent = true;
                         } catch (writeErr) {
@@ -767,6 +797,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 // fullResponseJson += JSON.stringify(chunk)+"\n\n";
                 if (!clientDisconnected.value && !res.writableEnded) {
                     try {
+                        stopKeepalive();
                         res.write(`data: ${JSON.stringify(chunk)}\n\n`);
                         anyDataSent = true;
                     } catch (writeErr) {
@@ -957,6 +988,8 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         }
         responseClosed = true;
     } finally {
+        stopKeepalive();
+
         // 释放并发插槽
         if (providerPoolManager && pooluuid) {
             providerPoolManager.releaseSlot(toProvider, pooluuid);
