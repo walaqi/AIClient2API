@@ -113,6 +113,7 @@
 > <details>
 > <summary>点击展开查看详细版本历史</summary>
 > 
+> - **2026.05.25 (v3.1.0)** - **Kiro 0.11→0.12 协议迁移与稳定性强化**。完成 Kiro 0.12 协议三阶段迁移，统一缓存与思考链口径；流式 retry-wait 期间增加 SSE 心跳保活，避免 `write after end` 与中间代理 524 超时；新增 `x-claude-code-session-id` 请求头解析并转发为 Kiro 上游 `conversationId`；Health-Check 修复 403/502/429（代理 session 轮换 + in-flight refresh 去重 + 429 冷却）；Write/Edit/Agent 工具描述截取白名单；多项工具解析修复（Write file_path/content 丢失、残缺工具调用判据）。
 > - **2026.05.04 (v3.0.0)** - **里程碑更新：AI 深度集成与自发现架构**。新增自动化 Skill 指南与远程 `/api/help`、`/api/example` 接口，支持 AI 代理无缝理解并操作 50+ 个全量 API 端点；实现了 CLI 与 REST API 输出结果的完全统一，增强了结构化 JSON 支持。
 > - **2026.04.29** - 全面支持 OpenAI 标准的图片生成 (`/v1/images/generations`) 与编辑 (`/v1/images/edits`) 接口。支持自动将 OpenAI 格式请求转换为各模型对应的原生生图协议，并适配号池轮询与自动重试机制，大幅提升多模态创作的稳定性。
 > - **2026.03.02** - 新增 Grok 协议支持，支持通过 Cookie/SSO 方式访问 xAI Grok 系列模型（Grok），支持多模态输入、图片/视频生成、自动 token 刷新及流式输出
