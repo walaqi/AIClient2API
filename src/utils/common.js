@@ -601,6 +601,36 @@ function getPluginHookRequestId(config) {
     return config?._monitorRequestId || null;
 }
 
+/**
+ * 等待 delayMs, 期间每 intervalMs 写一次 SSE 注释行保活, 客户端断开则立即返回。
+ * 返回 true 表示等满了, false 表示因客户端断开提前结束。
+ * 注释行不触发 anyDataSent (与 keep-alive 心跳同源, 见 commit 2e2228f 不变量)。
+ *
+ * 通道类型由 clientDisconnected 参数兼任标记:
+ *   - 传 { value: boolean } 共享对象: Stream 路径, 期间写 `: ka-retry ...` 心跳
+ *   - 传 null: Unary 路径, 仅 sleep + early-abort, 不写注释 (避免破坏 application/json)
+ */
+export async function waitWithKeepalive(res, delayMs, intervalMs, clientDisconnected) {
+    if (delayMs <= 0) return !(clientDisconnected?.value || res.writableEnded || res.destroyed);
+    const start = Date.now();
+    const heartbeatMs = Math.max(2000, Math.min(intervalMs, Math.floor(delayMs / 2) || delayMs));
+    while (Date.now() - start < delayMs) {
+        if (clientDisconnected?.value || res.writableEnded || res.destroyed) {
+            return false;
+        }
+        const remaining = delayMs - (Date.now() - start);
+        const tick = Math.min(heartbeatMs, remaining);
+        await new Promise(r => setTimeout(r, tick));
+        if (clientDisconnected?.value || res.writableEnded || res.destroyed) {
+            return false;
+        }
+        if (clientDisconnected && !res.writableEnded && !res.destroyed) {
+            try { res.write(`: ka-retry ${Date.now()}\n\n`); } catch (e) { return false; }
+        }
+    }
+    return !(clientDisconnected?.value || res.writableEnded || res.destroyed);
+}
+
 export async function handleStreamRequest(res, service, model, requestBody, fromProvider, toProvider, PROMPT_LOG_MODE, PROMPT_LOG_FILENAME, providerPoolManager, pooluuid, customName, retryContext = null) {
     let fullResponseText = '';
     let fullResponseJson = '';
@@ -877,7 +907,15 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                     ? retryAfterDelay
                     : Math.floor(Math.random() * 10000);
                 logger.info(`[Stream Retry] 429 for ${toProvider} (${pooluuid}).${rateLimitRecoveryTime ? ` Marked unhealthy, recovery at ${rateLimitRecoveryTime.toISOString()}.` : ''} Waiting ${randomDelay}ms (retry ${rateLimitRetry + 1}/3)...`);
-                await new Promise(resolve => setTimeout(resolve, randomDelay));
+                // 心跳保活 + 客户端断开早退。心跳间隔取 keep-alive 的 1/5 (默认 5s)
+                // 与 randomDelay/2 的较小值, 确保 ≤10s 窗口内至少 1-2 次心跳。
+                const heartbeatStep429 = Math.max(2000, Math.floor(keepaliveIntervalMs / 5));
+                const ok429 = await waitWithKeepalive(res, randomDelay, heartbeatStep429, clientDisconnected);
+                if (!ok429) {
+                    logger.info('[Stream Retry] Client disconnected during 429 retry wait, aborting retry');
+                    responseClosed = true;
+                    return;
+                }
 
                 const newRetryContext = {
                     ...retryContext, CONFIG, currentRetry, maxRetries,
@@ -929,9 +967,20 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             if (!is429) {
                 const randomDelay = Math.floor(Math.random() * 10000);
                 logger.info(`[Stream Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
-                await new Promise(resolve => setTimeout(resolve, randomDelay));
+                const heartbeatStepSwitch = Math.max(2000, Math.floor(keepaliveIntervalMs / 5));
+                const okSwitch = await waitWithKeepalive(res, randomDelay, heartbeatStepSwitch, clientDisconnected);
+                if (!okSwitch) {
+                    logger.info('[Stream Retry] Client disconnected before credential switch, aborting retry');
+                    responseClosed = true;
+                    return;
+                }
             } else {
                 logger.info(`[Stream Retry] 429 exhausted, switching credential immediately (retry ${currentRetry + 1}/${maxRetries})...`);
+                if (clientDisconnected.value || res.writableEnded || res.destroyed) {
+                    logger.info('[Stream Retry] Client disconnected before is429 credential switch, aborting');
+                    responseClosed = true;
+                    return;
+                }
             }
             
             try {
@@ -1131,7 +1180,12 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
                     ? retryAfterDelay
                     : Math.floor(Math.random() * 10000);
                 logger.info(`[Unary Retry] 429 for ${toProvider} (${pooluuid}).${rateLimitRecoveryTime ? ` Marked unhealthy, recovery at ${rateLimitRecoveryTime.toISOString()}.` : ''} Waiting ${randomDelay}ms (retry ${rateLimitRetry + 1}/3)...`);
-                await new Promise(resolve => setTimeout(resolve, randomDelay));
+                // Unary 不写心跳 (application/json 不允许中间字节), 仅 sleep + early-abort
+                const okUnary429 = await waitWithKeepalive(res, randomDelay, 5000, null);
+                if (!okUnary429) {
+                    logger.info('[Unary Retry] Client disconnected during 429 retry wait, aborting retry');
+                    return;
+                }
 
                 const newRetryContext = {
                     ...retryContext, CONFIG, currentRetry, maxRetries,
@@ -1182,9 +1236,17 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
             if (!is429) {
                 const randomDelay = Math.floor(Math.random() * 10000);
                 logger.info(`[Unary Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
-                await new Promise(resolve => setTimeout(resolve, randomDelay));
+                const okUnarySwitch = await waitWithKeepalive(res, randomDelay, 5000, null);
+                if (!okUnarySwitch) {
+                    logger.info('[Unary Retry] Client disconnected before credential switch, aborting retry');
+                    return;
+                }
             } else {
                 logger.info(`[Unary Retry] 429 exhausted, switching credential immediately (retry ${currentRetry + 1}/${maxRetries})...`);
+                if (res.writableEnded || res.destroyed) {
+                    logger.info('[Unary Retry] Client disconnected before is429 credential switch, aborting');
+                    return;
+                }
             }
             
             try {
