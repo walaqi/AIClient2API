@@ -3737,6 +3737,12 @@ async saveCredentialsToFile(filePath, newData) {
 
                     // 工具调用事件（包含 name 和 toolUseId）
                     if (tc.name && tc.toolUseId) {
+                        // 诊断：toolUse 到达时 thinking 块仍处于 open 状态，是 SSE 协议违规的强信号
+                        // （客户端可能拿到 tool 结果后不再发下一轮）。仅记录，不修复状态机。
+                        if (streamState.inThinking ||
+                            (streamState.thinkingBlockIndex != null && !streamState.stoppedBlocks.has(streamState.thinkingBlockIndex))) {
+                            logger.warn(`[Kiro Stream] toolUse arrived while thinking block still open. inThinking=${streamState.inThinking} thinkingBlockIndex=${streamState.thinkingBlockIndex} thinkingExtracted=${streamState.thinkingExtracted} bufferLen=${streamState.buffer.length} toolName=${tc.name} toolUseId=${tc.toolUseId}`);
+                        }
                         // 关闭文本块前先 flush 残留 buffer/pendingTextBeforeThinking,
                         // 避免反斜杠暂存或 <thinking> 安全裕量导致的尾部丢字。
                         toolEvents.push(...flushPendingText());
@@ -3755,7 +3761,10 @@ async saveCredentialsToFile(filePath, newData) {
                                     parsedInput = JSON.parse(currentToolCall.input);
                                 } catch (e) {
                                     const repaired = repairToolInputJson(currentToolCall.input);
-                                    try { parsedInput = JSON.parse(repaired); } catch (e2) {}
+                                    try { parsedInput = JSON.parse(repaired); }
+                                    catch (e2) {
+                                        logger.warn(`[Kiro Stream] Tool input JSON parse failed at tool switch for '${currentToolCall.name}' (id=${currentToolCall.toolUseId}). Sample: ${String(currentToolCall.input).slice(0, 200)}`);
+                                    }
                                 }
                                 if (!isIncompleteFileToolCall(currentToolCall.name, parsedInput)) {
                                     toolCalls.push({
@@ -3815,7 +3824,10 @@ async saveCredentialsToFile(filePath, newData) {
                                 parsedInput = JSON.parse(currentToolCall.input);
                             } catch (e) {
                                 const repaired = repairToolInputJson(currentToolCall.input);
-                                try { parsedInput = JSON.parse(repaired); } catch (e2) {}
+                                try { parsedInput = JSON.parse(repaired); }
+                                catch (e2) {
+                                    logger.warn(`[Kiro Stream] Tool input JSON parse failed at tc.stop for '${currentToolCall.name}' (id=${currentToolCall.toolUseId}). Sample: ${String(currentToolCall.input).slice(0, 200)}`);
+                                }
                             }
 
                             if (isIncompleteFileToolCall(currentToolCall.name, parsedInput)) {
@@ -3869,7 +3881,10 @@ async saveCredentialsToFile(filePath, newData) {
                             parsedInput = JSON.parse(currentToolCall.input);
                         } catch (e) {
                             const repaired = repairToolInputJson(currentToolCall.input);
-                            try { parsedInput = JSON.parse(repaired); } catch (e2) {}
+                            try { parsedInput = JSON.parse(repaired); }
+                            catch (e2) {
+                                logger.warn(`[Kiro Stream] Tool input JSON parse failed at toolUseStop for '${currentToolCall.name}' (id=${currentToolCall.toolUseId}). Sample: ${String(currentToolCall.input).slice(0, 200)}`);
+                            }
                         }
 
                         const blockIndex = toolUseBlockIndexes.get(currentToolCall.toolUseId);
@@ -3901,7 +3916,10 @@ async saveCredentialsToFile(filePath, newData) {
                     parsedInput = JSON.parse(currentToolCall.input);
                 } catch (e) {
                     const repaired = repairToolInputJson(currentToolCall.input);
-                    try { parsedInput = JSON.parse(repaired); } catch (e2) {}
+                    try { parsedInput = JSON.parse(repaired); }
+                    catch (e2) {
+                        logger.warn(`[Kiro Stream] Tool input JSON parse failed at stream-end fallback for '${currentToolCall.name}' (id=${currentToolCall.toolUseId}). Sample: ${String(currentToolCall.input).slice(0, 200)}`);
+                    }
                 }
                 const blockIndex = toolUseBlockIndexes.get(currentToolCall.toolUseId);
                 if (isIncompleteFileToolCall(currentToolCall.name, parsedInput)) {
@@ -4018,7 +4036,7 @@ async saveCredentialsToFile(filePath, newData) {
             if (emittedOnlyThinking) {
                 logger.warn(`[Kiro Stream] Thinking-only response; reporting stop_reason=end_turn`);
             }
-            logger.info(`[Kiro Stream] STREAM_SUMMARY model=${finalModel} stopReason=${stopReason} truncated=${wasTruncated} bufferRemain=${streamEndInfo.bufferRemain} socketAborted=${streamEndInfo.socketAborted} toolCalls=${toolCalls.length} outTok=${outputTokens} visibleText=${streamState.hasVisibleText} thinkingOnly=${emittedOnlyThinking} durMs=${Date.now() - streamStartMs}`);
+            logger.info(`[Kiro Stream] STREAM_SUMMARY model=${finalModel} stopReason=${stopReason} truncated=${wasTruncated} bufferRemain=${streamEndInfo.bufferRemain} socketAborted=${streamEndInfo.socketAborted} toolCalls=${toolCalls.length} outTok=${outputTokens} visibleText=${streamState.hasVisibleText} thinkingOnly=${emittedOnlyThinking} thinkingExtracted=${streamState.thinkingExtracted} inThinkingAtEnd=${streamState.inThinking} ctxPct=${contextUsagePercentage} durMs=${Date.now() - streamStartMs}`);
             if (!messageStartEmitted) {
                 yield messageStartEvent;
                 messageStartEmitted = true;
