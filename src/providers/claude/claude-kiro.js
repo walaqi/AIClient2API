@@ -2218,7 +2218,7 @@ async saveCredentialsToFile(filePath, newData) {
         }
 
 
-        if (this.authMethod === KIRO_CONSTANTS.AUTH_METHOD_SOCIAL) {
+        if (this.profileArn) {
             request.profileArn = this.profileArn;
         }
 
@@ -4356,7 +4356,7 @@ async saveCredentialsToFile(filePath, newData) {
             origin: KIRO_CONSTANTS.ORIGIN_AI_EDITOR,
             resourceType: resourceType
         });
-         if (this.authMethod === KIRO_CONSTANTS.AUTH_METHOD_SOCIAL && this.profileArn) {
+         if (this.profileArn) {
             params.append('profileArn', this.profileArn);
         }
         const fullUrl = `${usageLimitsUrl}?${params.toString()}`;

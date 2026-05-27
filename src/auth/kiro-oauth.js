@@ -48,6 +48,71 @@ const KIRO_OAUTH_CONFIG = {
 };
 
 /**
+ * 通过 CodeWhisperer ListAvailableProfiles 获取当前账号的 profileArn
+ * 用于 AWS Builder ID 设备码授权流程 (SSO OIDC /token 历史上不返回 profileArn)
+ *
+ * 防御点:
+ * - 若该接口本身被 AWS 改成需要 profileArn 才能调用 (鸡生蛋), 错误信息里通常会出现
+ *   "profileArn"/"missing"/"required" 等关键字, 此时打 ERROR 级日志高亮提示, 便于换路径
+ *   (例如改用 ssoOIDC GetSession / 新版 /token 响应字段 / 用户手填)
+ * @param {string} accessToken - 已经拿到的 Bearer accessToken
+ * @param {string} region - AWS 区域 (默认 us-east-1)
+ * @returns {Promise<string>} profileArn, 失败时返回空字符串
+ */
+async function fetchBuilderIDProfileArn(accessToken, region = 'us-east-1') {
+    if (!accessToken) {
+        return '';
+    }
+    const endpoint = `https://codewhisperer.${region}.amazonaws.com/`;
+    logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} Calling ListAvailableProfiles at ${endpoint}`);
+    try {
+        const response = await fetchWithProxy(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-amz-json-1.0',
+                'X-Amz-Target': 'AmazonCodeWhispererService.ListAvailableProfiles',
+                'Authorization': `Bearer ${accessToken}`,
+                'User-Agent': 'KiroIDE'
+            },
+            body: JSON.stringify({ maxResults: 10 })
+        }, 'claude-kiro-oauth');
+
+        if (!response.ok) {
+            const errText = await response.text();
+            const lower = (errText || '').toLowerCase();
+            // 防御: 接口本身如果开始要求 profileArn, 这就是死循环, 必须改流程
+            if (lower.includes('profilearn') && (lower.includes('required') || lower.includes('missing') || lower.includes('mandatory'))) {
+                logger.error(`${KIRO_OAUTH_CONFIG.logPrefix} [FLOW-BREAK] ListAvailableProfiles itself appears to require profileArn now (HTTP ${response.status}). Response: ${errText}. The current bootstrap path is broken — pick profileArn from a different source (e.g. user input, OIDC /token response, or new AWS API).`);
+            } else {
+                logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} ListAvailableProfiles failed: HTTP ${response.status} - ${errText}`);
+            }
+            return '';
+        }
+
+        const data = await response.json();
+        try {
+            const respKeys = Object.keys(data || {}).sort();
+            logger.debug(`${KIRO_OAUTH_CONFIG.logPrefix} ListAvailableProfiles response fields: [${respKeys.join(', ')}]`);
+        } catch (_) { /* ignore */ }
+        const profiles = Array.isArray(data?.profiles) ? data.profiles : [];
+        if (profiles.length === 0) {
+            logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} ListAvailableProfiles returned empty profiles list`);
+            return '';
+        }
+        const arn = profiles[0]?.arn || '';
+        if (!arn) {
+            logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} ListAvailableProfiles first profile missing arn`);
+        } else {
+            logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} Resolved profileArn via ListAvailableProfiles: ${arn} (total profiles: ${profiles.length})`);
+        }
+        return arn;
+    } catch (error) {
+        logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} ListAvailableProfiles error: ${error.message}`);
+        return '';
+    }
+}
+
+/**
  * 活动的 Kiro 回调服务器管理
  */
 const activeKiroServers = new Map();
@@ -419,7 +484,25 @@ async function pollKiroBuilderIDToken(clientId, clientSecret, deviceCode, interv
             
             if (response.ok && data.accessToken) {
                 logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} 成功获取令牌 [${taskId}]`);
-                
+
+                // 记录 OIDC /token 响应的字段集, 便于发现 AWS 是否在某天开始直接返回 profileArn
+                try {
+                    const responseKeys = Object.keys(data || {}).sort();
+                    logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} OIDC /token response fields: [${responseKeys.join(', ')}]`);
+                } catch (_) { /* ignore */ }
+
+                const region = options.region || 'us-east-1';
+                let profileArn = '';
+
+                // 优先级 1: 如果 AWS SSO OIDC /token 直接返回了 profileArn, 直接使用并打 flag 日志
+                if (typeof data.profileArn === 'string' && data.profileArn.trim()) {
+                    profileArn = data.profileArn.trim();
+                    logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} [FLOW-CHANGE] AWS SSO OIDC /token now returns profileArn directly: ${profileArn}. Skipping ListAvailableProfiles. Consider simplifying the auth flow.`);
+                } else {
+                    // 优先级 2: 调用 CodeWhisperer ListAvailableProfiles 作为兜底
+                    profileArn = await fetchBuilderIDProfileArn(data.accessToken, region);
+                }
+
                 // 保存令牌（符合现有规范）
                 if (options.saveToConfigs) {
                     const timestamp = Date.now();
@@ -428,7 +511,7 @@ async function pollKiroBuilderIDToken(clientId, clientSecret, deviceCode, interv
                     await fs.promises.mkdir(targetDir, { recursive: true });
                     credPath = path.join(targetDir, `${folderName}.json`);
                 }
-                
+
                 const tokenData = {
                     accessToken: data.accessToken,
                     refreshToken: data.refreshToken,
@@ -436,7 +519,9 @@ async function pollKiroBuilderIDToken(clientId, clientSecret, deviceCode, interv
                     authMethod: 'builder-id',
                     clientId,
                     clientSecret,
-                    idcRegion: options.region || 'us-east-1'
+                    idcRegion: region,
+                    profileArn,
+                    region
                 };
                 
                 await fs.promises.mkdir(path.dirname(credPath), { recursive: true });
