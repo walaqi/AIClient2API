@@ -3453,6 +3453,11 @@ async saveCredentialsToFile(filePath, newData) {
             if (index == null) return [];
             if (streamState.stoppedBlocks.has(index)) return [];
             streamState.stoppedBlocks.add(index);
+            // 关闭后清理状态机指针，使后续到来的 text/thinking 事件能正确开新块,
+            // 否则 ensureBlockStart('text') 会因 textBlockIndex != null 短路返回，
+            // 导致对已 stop 的 index 继续发 content_block_delta，违反 Claude 协议。
+            if (streamState.textBlockIndex === index) streamState.textBlockIndex = null;
+            if (streamState.thinkingBlockIndex === index) streamState.thinkingBlockIndex = null;
             return [{ type: "content_block_stop", index }];
         };
 
@@ -3507,6 +3512,41 @@ async saveCredentialsToFile(filePath, newData) {
                 yield ev;
             }
         }
+
+        // 在文本→工具边界以及流末尾，把残留 buffer / pendingTextBeforeThinking 全部 flush
+        // 出去，避免被 stopBlock 关闭文本块后吞掉末尾几字符。
+        const flushPendingText = () => {
+            const out = [];
+            if (streamState.thinkingRequested) {
+                if (streamState.inThinking) {
+                    if (streamState.stripThinkingLeadingNewline) {
+                        if (streamState.buffer.startsWith('\r\n')) streamState.buffer = streamState.buffer.slice(2);
+                        else if (streamState.buffer.startsWith('\n')) streamState.buffer = streamState.buffer.slice(1);
+                        streamState.stripThinkingLeadingNewline = false;
+                    }
+                    if (streamState.buffer) out.push(...createThinkingDeltaEvents(streamState.buffer));
+                    streamState.buffer = '';
+                } else if (!streamState.thinkingExtracted) {
+                    const remaining = `${streamState.pendingTextBeforeThinking}${streamState.buffer}`;
+                    streamState.pendingTextBeforeThinking = '';
+                    streamState.buffer = '';
+                    if (remaining) out.push(...createTextDeltaEvents(remaining));
+                } else {
+                    let rest = streamState.buffer;
+                    streamState.buffer = '';
+                    if (streamState.stripTextLeadingNewlinesAfterThinking) {
+                        if (rest.startsWith('\r\n\r\n')) rest = rest.slice(4);
+                        else if (rest.startsWith('\n\n')) rest = rest.slice(2);
+                        streamState.stripTextLeadingNewlinesAfterThinking = false;
+                    }
+                    if (rest) out.push(...createTextDeltaEvents(rest));
+                }
+            } else if (streamState.buffer) {
+                out.push(...createTextDeltaEvents(streamState.buffer));
+                streamState.buffer = '';
+            }
+            return out;
+        };
 
         try {
             const streamStartMs = Date.now();
@@ -3697,6 +3737,9 @@ async saveCredentialsToFile(filePath, newData) {
 
                     // 工具调用事件（包含 name 和 toolUseId）
                     if (tc.name && tc.toolUseId) {
+                        // 关闭文本块前先 flush 残留 buffer/pendingTextBeforeThinking,
+                        // 避免反斜杠暂存或 <thinking> 安全裕量导致的尾部丢字。
+                        toolEvents.push(...flushPendingText());
                         // 遇到工具调用时，立即关闭文本块，避免前端等待到流结束才看到 content_block_stop
                         toolEvents.push(...stopBlock(streamState.textBlockIndex));
 
@@ -3881,39 +3924,13 @@ async saveCredentialsToFile(filePath, newData) {
                 currentToolCall = null;
             }
 
-            if (thinkingRequested && (streamState.inThinking || streamState.buffer || streamState.pendingTextBeforeThinking)) {
-                if (streamState.inThinking) {
-                    logger.warn('[Kiro] Incomplete thinking tag at stream end');
-                    // Strip a single leading newline after `<thinking>` if we haven't yet.
-                    if (streamState.stripThinkingLeadingNewline) {
-                        if (streamState.buffer.startsWith('\r\n')) streamState.buffer = streamState.buffer.slice(2);
-                        else if (streamState.buffer.startsWith('\n')) streamState.buffer = streamState.buffer.slice(1);
-                        streamState.stripThinkingLeadingNewline = false;
-                    }
-                    yield* pushEvents(createThinkingDeltaEvents(streamState.buffer));
-                    streamState.buffer = '';
-                    yield* pushEvents(createThinkingDeltaEvents(""));
-                    yield* pushEvents(stopBlock(streamState.thinkingBlockIndex));
-                } else if (!streamState.thinkingExtracted) {
-                    const remaining = `${streamState.pendingTextBeforeThinking}${streamState.buffer}`;
-                    streamState.pendingTextBeforeThinking = '';
-                    if (remaining) yield* pushEvents(createTextDeltaEvents(remaining));
-                    streamState.buffer = '';
-                } else {
-                    let remaining = streamState.buffer;
-                    streamState.buffer = '';
-                    if (streamState.stripTextLeadingNewlinesAfterThinking) {
-                        if (remaining.startsWith('\r\n\r\n')) remaining = remaining.slice(4);
-                        else if (remaining.startsWith('\n\n')) remaining = remaining.slice(2);
-                        streamState.stripTextLeadingNewlinesAfterThinking = false;
-                    }
-                    if (remaining) yield* pushEvents(createTextDeltaEvents(remaining));
-                    streamState.buffer = '';
-                }
-            } else if (!thinkingRequested && streamState.buffer) {
-                // 处理非思考模式下剩余的缓冲区数据
-                yield* pushEvents(createTextDeltaEvents(streamState.buffer));
-                streamState.buffer = '';
+            if (thinkingRequested && streamState.inThinking) {
+                logger.warn('[Kiro] Incomplete thinking tag at stream end');
+            }
+            yield* pushEvents(flushPendingText());
+            if (thinkingRequested && streamState.inThinking) {
+                yield* pushEvents(createThinkingDeltaEvents(""));
+                yield* pushEvents(stopBlock(streamState.thinkingBlockIndex));
             }
 
             const emittedOnlyThinking = thinkingRequested &&
