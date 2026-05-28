@@ -3116,6 +3116,7 @@ async saveCredentialsToFile(filePath, newData) {
         // 首字节到达后切换到 socket inactivity 超时
         const streamInactivityTimeout = this.config?.KIRO_STREAM_INACTIVITY_MS || KIRO_CONSTANTS.STREAM_INACTIVITY_TIMEOUT;
         try {
+            const streamStartMs = Date.now();
             releaseThrottle = await acquireKiroRequestSlot(this.config);
             let response = null;
             let lastReqError = null;
@@ -3273,6 +3274,15 @@ async saveCredentialsToFile(filePath, newData) {
             if (truncated) {
                 logger.warn(`[Kiro Stream] Detected truncation: bufferRemain=${buffer.length}, socketAborted=${socketAborted}`);
             }
+            // 上游偶发空响应 (HTTP 200 + 0 byte + 正常 close): 当作可重试错误抛出,
+            // 走下方 isNetworkError 通道. 避免向客户端发空 end_turn 让任务被误认为自然结束.
+            if (chunkCount === 0 && !socketAborted) {
+                logger.warn(`[Kiro Stream] Empty stream detected (chunkCount=0, totalRawBytes=0, durMs=${Date.now() - streamStartMs}), throwing as KIRO_EMPTY_STREAM for retry`);
+                const emptyErr = new Error('Kiro upstream returned empty stream (0 chunks, 0 bytes)');
+                emptyErr.code = 'KIRO_EMPTY_STREAM';
+                emptyErr.isKiroEmptyStream = true;
+                throw emptyErr;
+            }
             yield { type: '__kiroStreamEnd', truncated, bufferRemain: buffer.length, socketAborted };
         } catch (error) {
             // 确保出错时关闭流
@@ -3345,10 +3355,10 @@ async saveCredentialsToFile(filePath, newData) {
                 throw error;
             }
 
-            // Handle network errors (ECONNRESET, ETIMEDOUT, etc.) with exponential backoff
-            if (isNetworkError && retryCount < maxRetries) {
+            // Handle network errors (ECONNRESET, ETIMEDOUT, etc.) and KIRO_EMPTY_STREAM with exponential backoff
+            if ((isNetworkError || error?.isKiroEmptyStream) && retryCount < maxRetries) {
                 const delay = baseDelay * Math.pow(2, retryCount);
-                const errorIdentifier = errorCode || errorMessage.substring(0, 50);
+                const errorIdentifier = error?.isKiroEmptyStream ? 'EMPTY_STREAM' : (errorCode || errorMessage.substring(0, 50));
                 logger.info(`[Kiro][${this._nodeName}] Network error (${errorIdentifier}) in stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 yield* this.streamApiReal(method, model, body, isRetry, retryCount + 1);
