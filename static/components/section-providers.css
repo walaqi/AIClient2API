@@ -1310,6 +1310,22 @@
     color: rgb(220, 38, 38);
 }
 
+.provider-detected-models-badge.new {
+    background: rgba(59, 130, 246, 0.15);
+    color: rgb(37, 99, 235);
+}
+
+.provider-detected-models-badges {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.provider-detected-models-item.is-new {
+    border-left: 3px solid rgb(59, 130, 246);
+    padding-left: 7px;
+}
+
 [data-theme="dark"] .provider-detected-models-item {
     background: var(--bg-tertiary, #1f2937);
 }

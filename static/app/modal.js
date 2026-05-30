@@ -362,8 +362,9 @@ function showSupportedModelsPickerModal(providerType, uuid, detectedModels, curr
  * @param {string} uuid
  * @param {Array<string>} detectedModels - 从上游 listModels() 拉到的模型 ID
  * @param {Array<string>} notSupportedModels - 当前节点已禁用的模型
+ * @param {Array<string>} [persistedAdded] - 本次检测新落盘到 custom_models.json 的模型 ID
  */
-function showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSupportedModels = []) {
+function showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSupportedModels = [], persistedAdded = []) {
     const existingOverlay = document.querySelector('.provider-detected-models-overlay');
     if (existingOverlay) {
         if (existingOverlay.escapeHandler) {
@@ -374,6 +375,7 @@ function showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSu
 
     const allModels = normalizeModelList(detectedModels);
     const disabledSet = new Set(normalizeModelList(notSupportedModels));
+    const newPersistedSet = new Set(normalizeModelList(persistedAdded));
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay provider-detected-models-overlay';
     overlay.style.display = 'flex';
@@ -424,10 +426,12 @@ function showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSu
     const renderList = () => {
         const visible = getVisibleModels();
         const disabledCount = visible.filter(m => disabledSet.has(m)).length;
+        const newCount = visible.filter(m => newPersistedSet.has(m)).length;
         summary.textContent = t('modal.provider.detectedModelsSummary', {
             total: allModels.length,
             visible: visible.length,
-            disabled: disabledCount
+            disabled: disabledCount,
+            new: newCount
         });
 
         if (visible.length === 0) {
@@ -441,13 +445,20 @@ function showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSu
 
         listContainer.innerHTML = visible.map(model => {
             const isDisabled = disabledSet.has(model);
-            const badge = isDisabled
-                ? `<span class="provider-detected-models-badge disabled" title="${escapeHtml(t('modal.provider.detectedModelsDisabledTip'))}">${escapeHtml(t('modal.provider.detectedModelsDisabledBadge'))}</span>`
-                : `<span class="provider-detected-models-badge enabled">${escapeHtml(t('modal.provider.detectedModelsEnabledBadge'))}</span>`;
+            const isNew = newPersistedSet.has(model);
+            const badges = [];
+            if (isNew) {
+                badges.push(`<span class="provider-detected-models-badge new" title="${escapeHtml(t('modal.provider.detectedModelsNewTip'))}">${escapeHtml(t('modal.provider.detectedModelsNewBadge'))}</span>`);
+            }
+            if (isDisabled) {
+                badges.push(`<span class="provider-detected-models-badge disabled" title="${escapeHtml(t('modal.provider.detectedModelsDisabledTip'))}">${escapeHtml(t('modal.provider.detectedModelsDisabledBadge'))}</span>`);
+            } else {
+                badges.push(`<span class="provider-detected-models-badge enabled">${escapeHtml(t('modal.provider.detectedModelsEnabledBadge'))}</span>`);
+            }
             return `
-                <div class="provider-detected-models-item ${isDisabled ? 'is-disabled' : ''}">
+                <div class="provider-detected-models-item ${isDisabled ? 'is-disabled' : ''} ${isNew ? 'is-new' : ''}">
                     <span class="provider-detected-models-name">${escapeHtml(model)}</span>
-                    ${badge}
+                    <span class="provider-detected-models-badges">${badges.join('')}</span>
                 </div>
             `;
         }).join('');
@@ -527,6 +538,8 @@ async function viewProviderDetectedModels(uuid, event) {
         );
 
         const detectedModels = Array.isArray(response.models) ? response.models : [];
+        const persisted = response.persisted || { added: [], skipped: [] };
+        const persistedAdded = Array.isArray(persisted.added) ? persisted.added : [];
 
         // 取得当前节点已配置的 notSupportedModels（用于在弹窗里标注）
         const providerData = currentProviders.find(p => p.uuid === uuid) || {};
@@ -537,7 +550,16 @@ async function viewProviderDetectedModels(uuid, event) {
             return;
         }
 
-        showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSupportedModels);
+        showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSupportedModels, persistedAdded);
+
+        // 落盘成功提示：仅在确实新写入了模型时弹 toast
+        if (persistedAdded.length > 0) {
+            showToast(
+                t('common.success'),
+                t('modal.provider.detectModelsPersisted', { count: persistedAdded.length }),
+                'success'
+            );
+        }
     } catch (error) {
         console.error('Failed to detect provider models:', error);
         showToast(t('common.error'), t('modal.provider.detectModelsFailed') + ': ' + error.message, 'error');

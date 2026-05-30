@@ -13,6 +13,7 @@ import { broadcastEvent } from './event-broadcast.js';
 import { getRegisteredProviders, getServiceAdapter, invalidateServiceAdapter, serviceInstances } from '../providers/adapter.js';
 import { withFileLock, atomicWriteFile } from '../utils/file-lock.js';
 import { normalizeProviderConfigFields } from '../utils/provider-config-normalizer.js';
+import { persistDetectedModels } from './custom-models-api.js';
 
 
 
@@ -461,6 +462,23 @@ export async function handleDetectProviderModels(req, res, currentConfig, provid
             delete serviceInstances[instanceKey];
         }
 
+        // 自动落盘：把上游返回的、本仓库 PROVIDER_MODELS 里没有的"新模型"写进
+        // custom_models.json，这样它们会被 getProviderModels() 注入运行时清单，
+        // "模型测试"等下拉里立即可见。冲突保留现有项，不覆盖。
+        // managed 类型 (openai-custom 等) 走自己的 supportedModels 白名单流程，不在这里落盘。
+        let persisted = { added: [], skipped: [] };
+        if (!usesManagedModelList(providerType) && models.length > 0) {
+            try {
+                const builtinModels = new Set(getProviderModels(providerType));
+                const newModels = models.filter(m => !builtinModels.has(m));
+                if (newModels.length > 0) {
+                    persisted = await persistDetectedModels(currentConfig, providerType, newModels);
+                }
+            } catch (persistError) {
+                logger.warn(`[UI API] persistDetectedModels failed for ${providerType}/${providerUuid}: ${persistError.message}`);
+            }
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({
             success: true,
@@ -468,7 +486,11 @@ export async function handleDetectProviderModels(req, res, currentConfig, provid
             uuid: providerUuid,
             count: models.length,
             models,
-            selectedModels: getConfiguredSupportedModels(providerType, existingProvider)
+            selectedModels: getConfiguredSupportedModels(providerType, existingProvider),
+            persisted: {
+                added: persisted.added.map(m => m.id),
+                skipped: persisted.skipped
+            }
         }));
         return true;
     } catch (error) {
