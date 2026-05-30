@@ -4307,11 +4307,92 @@ async saveCredentialsToFile(filePath, newData) {
      * List available models
      */
     async listModels() {
-        const models = KIRO_MODELS.map(id => ({
-            name: id
-        }));
-        
-        return { models: models };
+        // 优先调用上游真实 API；失败时回落到硬编码 KIRO_MODELS。
+        // 端点格式（来自 Kiro IDE 0.12 抓包）：
+        //   GET https://q.{region}.amazonaws.com/ListAvailableModels?origin=AI_EDITOR&profileArn=...
+        // 返回 { defaultModel, models: [{ modelId, modelName, ... }], nextToken }
+        if (!this.isInitialized) await this.initialize();
+
+        try {
+            // 用 baseUrl 同源换路径，避免跨 region 拼错
+            const listUrl = (this.baseUrl || '').replace(/generateAssistantResponse$/, 'ListAvailableModels');
+            if (!listUrl || listUrl === this.baseUrl) {
+                throw new Error(`Cannot derive ListAvailableModels URL from baseUrl: ${this.baseUrl}`);
+            }
+
+            const params = new URLSearchParams({
+                origin: KIRO_CONSTANTS.ORIGIN_AI_EDITOR
+            });
+            if (this.profileArn) {
+                params.append('profileArn', this.profileArn);
+            }
+            const fullUrl = `${listUrl}?${params.toString()}`;
+
+            const machineId = generateMachineIdFromConfig({
+                uuid: this.uuid,
+                profileArn: this.profileArn,
+                clientId: this.clientId
+            });
+            const isIdc = isKiroIdcAuth(this.authMethod);
+            const headers = {
+                'Authorization': `Bearer ${this.accessToken}`,
+                'x-amz-user-agent': isIdc ? KIRO_CLI_AMZ_USER_AGENT : getKiroAmzUserAgent(machineId),
+                'user-agent': isIdc ? KIRO_CLI_USER_AGENT : getKiroUserAgent(machineId),
+                'amz-sdk-invocation-id': uuidv4(),
+                'amz-sdk-request': 'attempt=1; max=1',
+                'Connection': 'close'
+            };
+
+            const axiosConfig = {
+                method: 'get',
+                url: fullUrl,
+                headers
+            };
+            this._applySidecar(axiosConfig);
+
+            logger.info(`[Kiro] Fetching available models from ${fullUrl.split('?')[0]} (profileArn=${this.profileArn || '(none)'})`);
+            const response = await this.axiosInstance.request(axiosConfig);
+
+            const upstreamModels = Array.isArray(response.data?.models) ? response.data.models : [];
+            if (upstreamModels.length === 0) {
+                logger.warn('[Kiro] ListAvailableModels returned empty list, falling back to hardcoded KIRO_MODELS');
+                return { models: KIRO_MODELS.map(id => ({ name: id })) };
+            }
+
+            // 把上游 modelId 映射为 { name } 格式（保持与原 listModels 输出兼容）。
+            // 同时附带 description / tokenLimits 等元信息供前端展示。
+            const models = upstreamModels
+                .filter(m => m && typeof m.modelId === 'string' && m.modelId.length > 0)
+                .map(m => ({
+                    name: m.modelId,
+                    displayName: m.modelName || m.modelId,
+                    description: m.description || '',
+                    inputTokenLimit: m.tokenLimits?.maxInputTokens,
+                    outputTokenLimit: m.tokenLimits?.maxOutputTokens,
+                    rateMultiplier: m.rateMultiplier,
+                    rateUnit: m.rateUnit,
+                    supportsPromptCaching: m.promptCaching?.supportsPromptCaching,
+                    supportedInputTypes: m.supportedInputTypes
+                }));
+
+            logger.info(`[Kiro] ListAvailableModels success: ${models.length} models (upstream IDs: ${models.map(m => m.name).join(', ')})`);
+            return { models, defaultModel: response.data?.defaultModel };
+        } catch (error) {
+            const status = error.response?.status;
+            let errorMessage = error.message;
+            if (error.response?.data) {
+                const responseData = error.response.data;
+                if (typeof responseData === 'string') {
+                    errorMessage = responseData;
+                } else if (responseData.message) {
+                    errorMessage = responseData.message;
+                } else if (responseData.error) {
+                    errorMessage = typeof responseData.error === 'string' ? responseData.error : (responseData.error.message || JSON.stringify(responseData.error));
+                }
+            }
+            logger.warn(`[Kiro] ListAvailableModels failed (status=${status || 'n/a'}, message=${errorMessage}); falling back to hardcoded KIRO_MODELS`);
+            return { models: KIRO_MODELS.map(id => ({ name: id })) };
+        }
     }
 
     /**
