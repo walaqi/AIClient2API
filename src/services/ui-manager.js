@@ -41,7 +41,18 @@ export async function serveStaticFiles(pathParam, res) {
             '.ico': 'image/x-icon'
         }[ext] || 'text/plain';
 
-        res.writeHead(200, { 'Content-Type': contentType });
+        // 静态资源（HTML/JS/CSS/JSON）不带文件指纹，浏览器一旦缓存就难刷新；
+        // 使用 no-cache 让浏览器每次都向服务器验证（实际无变更时仍可走 304），
+        // 避免发布新代码后用户看到旧 UI。图片/字体等不易频繁改动的资源仍允许长缓存。
+        const noCacheTypes = new Set(['.html', '.js', '.css', '.json']);
+        const cacheControl = noCacheTypes.has(ext)
+            ? 'no-cache, must-revalidate'
+            : 'public, max-age=86400';
+
+        res.writeHead(200, {
+            'Content-Type': contentType,
+            'Cache-Control': cacheControl
+        });
         res.end(readFileSync(filePath));
         return true;
     }
