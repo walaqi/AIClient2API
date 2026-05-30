@@ -354,6 +354,201 @@ function showSupportedModelsPickerModal(providerType, uuid, detectedModels, curr
     searchInput.focus();
 }
 
+/**
+ * 显示"检测到的模型"只读查看弹窗。用于行级"检测模型"按钮：
+ * 不需要进入编辑态，纯展示从上游账号拉取到的真实模型列表，
+ * 并标注当前已被加入 notSupportedModels 黑名单的项。
+ * @param {string} providerType
+ * @param {string} uuid
+ * @param {Array<string>} detectedModels - 从上游 listModels() 拉到的模型 ID
+ * @param {Array<string>} notSupportedModels - 当前节点已禁用的模型
+ */
+function showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSupportedModels = []) {
+    const existingOverlay = document.querySelector('.provider-detected-models-overlay');
+    if (existingOverlay) {
+        if (existingOverlay.escapeHandler) {
+            document.removeEventListener('keydown', existingOverlay.escapeHandler);
+        }
+        existingOverlay.remove();
+    }
+
+    const allModels = normalizeModelList(detectedModels);
+    const disabledSet = new Set(normalizeModelList(notSupportedModels));
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay provider-detected-models-overlay';
+    overlay.style.display = 'flex';
+    overlay.innerHTML = `
+        <div class="modal-content provider-model-picker-modal">
+            <div class="modal-header">
+                <h3>
+                    <i class="fas fa-cubes"></i>
+                    ${escapeHtml(t('modal.provider.detectedModelsTitle', { type: providerType }))}
+                </h3>
+                <button class="modal-close" type="button" aria-label="${escapeHtml(t('common.close'))}">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="provider-model-picker-toolbar">
+                    <input type="search"
+                           class="provider-model-picker-search"
+                           placeholder="${escapeHtml(t('modal.provider.modelPickerSearchPlaceholder'))}">
+                    <button type="button" class="btn btn-secondary provider-detected-models-copy">
+                        <i class="fas fa-copy"></i> ${escapeHtml(t('modal.provider.detectedModelsCopy'))}
+                    </button>
+                </div>
+                <div class="provider-model-picker-summary"></div>
+                <div class="provider-model-picker-list provider-detected-models-list"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary provider-detected-models-close">
+                    ${escapeHtml(t('common.close'))}
+                </button>
+            </div>
+        </div>
+    `;
+
+    const searchInput = overlay.querySelector('.provider-model-picker-search');
+    const listContainer = overlay.querySelector('.provider-detected-models-list');
+    const summary = overlay.querySelector('.provider-model-picker-summary');
+    const copyButton = overlay.querySelector('.provider-detected-models-copy');
+    const closeButton = overlay.querySelector('.modal-close');
+    const footerCloseButton = overlay.querySelector('.provider-detected-models-close');
+
+    const getVisibleModels = () => {
+        const keyword = searchInput.value.trim().toLowerCase();
+        if (!keyword) return allModels;
+        return allModels.filter(m => m.toLowerCase().includes(keyword));
+    };
+
+    const renderList = () => {
+        const visible = getVisibleModels();
+        const disabledCount = visible.filter(m => disabledSet.has(m)).length;
+        summary.textContent = t('modal.provider.detectedModelsSummary', {
+            total: allModels.length,
+            visible: visible.length,
+            disabled: disabledCount
+        });
+
+        if (visible.length === 0) {
+            listContainer.innerHTML = `
+                <div class="provider-model-picker-empty">
+                    ${escapeHtml(allModels.length === 0 ? t('modal.provider.detectModelsNoResults') : t('modal.provider.modelPickerNoMatch'))}
+                </div>
+            `;
+            return;
+        }
+
+        listContainer.innerHTML = visible.map(model => {
+            const isDisabled = disabledSet.has(model);
+            const badge = isDisabled
+                ? `<span class="provider-detected-models-badge disabled" title="${escapeHtml(t('modal.provider.detectedModelsDisabledTip'))}">${escapeHtml(t('modal.provider.detectedModelsDisabledBadge'))}</span>`
+                : `<span class="provider-detected-models-badge enabled">${escapeHtml(t('modal.provider.detectedModelsEnabledBadge'))}</span>`;
+            return `
+                <div class="provider-detected-models-item ${isDisabled ? 'is-disabled' : ''}">
+                    <span class="provider-detected-models-name">${escapeHtml(model)}</span>
+                    ${badge}
+                </div>
+            `;
+        }).join('');
+    };
+
+    const handleClose = () => {
+        if (overlay.escapeHandler) {
+            document.removeEventListener('keydown', overlay.escapeHandler);
+        }
+        overlay.remove();
+    };
+
+    overlay.escapeHandler = e => {
+        if (e.key === 'Escape') handleClose();
+    };
+    document.addEventListener('keydown', overlay.escapeHandler);
+    overlay.addEventListener('click', e => {
+        if (e.target === overlay) handleClose();
+    });
+
+    searchInput.addEventListener('input', renderList);
+    closeButton.addEventListener('click', handleClose);
+    footerCloseButton.addEventListener('click', handleClose);
+    copyButton.addEventListener('click', async () => {
+        const text = allModels.join('\n');
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                const ta = document.createElement('textarea');
+                ta.value = text;
+                ta.style.position = 'fixed';
+                ta.style.opacity = '0';
+                document.body.appendChild(ta);
+                ta.select();
+                document.execCommand('copy');
+                document.body.removeChild(ta);
+            }
+            showToast(t('common.success'), t('modal.provider.detectedModelsCopied', { count: allModels.length }), 'success');
+        } catch (err) {
+            console.error('Copy failed:', err);
+            showToast(t('common.error'), err.message || 'copy failed', 'error');
+        }
+    });
+
+    document.body.appendChild(overlay);
+    renderList();
+    searchInput.focus();
+}
+
+/**
+ * 行级"检测模型"按钮入口：直接拉取并展示，无需进入编辑态。
+ * @param {string} uuid
+ * @param {Event} event
+ */
+async function viewProviderDetectedModels(uuid, event) {
+    event.stopPropagation();
+
+    const providerType = currentProviderType;
+    if (!providerType) {
+        showToast(t('common.error'), 'provider type unknown', 'error');
+        return;
+    }
+
+    const button = event.target.closest('button');
+    const originalHtml = button?.innerHTML;
+    if (button) {
+        button.disabled = true;
+        button.innerHTML = `<i class="fas fa-spinner fa-spin"></i>`;
+    }
+
+    try {
+        // 拉取上游模型；后端不要求 providerConfig（缺省时使用已落盘配置即可）
+        const response = await window.apiClient.post(
+            `/providers/${encodeURIComponent(providerType)}/${uuid}/detect-models`,
+            {}
+        );
+
+        const detectedModels = Array.isArray(response.models) ? response.models : [];
+
+        // 取得当前节点已配置的 notSupportedModels（用于在弹窗里标注）
+        const providerData = currentProviders.find(p => p.uuid === uuid) || {};
+        const notSupportedModels = Array.isArray(providerData.notSupportedModels) ? providerData.notSupportedModels : [];
+
+        if (detectedModels.length === 0) {
+            showToast(t('common.info'), t('modal.provider.detectModelsNoResults'), 'info');
+            return;
+        }
+
+        showDetectedModelsViewerModal(providerType, uuid, detectedModels, notSupportedModels);
+    } catch (error) {
+        console.error('Failed to detect provider models:', error);
+        showToast(t('common.error'), t('modal.provider.detectModelsFailed') + ': ' + error.message, 'error');
+    } finally {
+        if (button) {
+            button.disabled = false;
+            button.innerHTML = originalHtml;
+        }
+    }
+}
+
 async function openSupportedModelsPicker(providerType, uuid, event) {
     event.stopPropagation();
 
@@ -933,6 +1128,9 @@ function renderProviderDetailList(providers) {
                         <button class="btn-small btn-info btn-provider-health-check" onclick="window.performSingleHealthCheck('${provider.uuid}', event)" title="${t('modal.provider.healthCheckCurrentTitle')}">
                             <i class="fas fa-stethoscope"></i> <span data-i18n="modal.provider.healthCheck">${t('modal.provider.healthCheck')}</span>
                         </button>
+                        <button class="btn-small btn-secondary btn-detect-models-row" onclick="window.viewProviderDetectedModels('${provider.uuid}', event)" title="${escapeHtml(t('modal.provider.detectModelsHelp'))}">
+                            <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="modal.provider.detectModels">${t('modal.provider.detectModels')}</span>
+                        </button>
                         <button class="btn-small btn-delete" onclick="window.deleteProvider('${provider.uuid}', event)">
                             <i class="fas fa-trash"></i> <span data-i18n="modal.provider.delete">删除</span>
                         </button>
@@ -989,6 +1187,9 @@ function renderProviderCardList(providers) {
                 <div class="card-actions" onclick="event.stopPropagation()">
                     <button class="card-action-btn ${toggleButtonClass}" onclick="window.toggleProviderStatus('${provider.uuid}', event)" title="${toggleButtonText}">
                         <i class="${toggleButtonIcon}"></i>
+                    </button>
+                    <button class="card-action-btn btn-detect-models-row" onclick="window.viewProviderDetectedModels('${provider.uuid}', event)" title="${escapeHtml(t('modal.provider.detectModels'))}">
+                        <i class="fas fa-wand-magic-sparkles"></i>
                     </button>
                     <button class="card-action-btn btn-delete" onclick="window.deleteProvider('${provider.uuid}', event)" title="${t('modal.provider.delete')}">
                         <i class="fas fa-trash"></i>
@@ -1555,6 +1756,9 @@ function cancelEdit(uuid, event) {
         </button>
         <button class="btn-small btn-info btn-provider-health-check" onclick="window.performSingleHealthCheck('${uuid}', event)" title="${t('modal.provider.healthCheckCurrentTitle')}">
             <i class="fas fa-stethoscope"></i> <span data-i18n="modal.provider.healthCheck">${t('modal.provider.healthCheck')}</span>
+        </button>
+        <button class="btn-small btn-secondary btn-detect-models-row" onclick="window.viewProviderDetectedModels('${uuid}', event)" title="${escapeHtml(t('modal.provider.detectModelsHelp'))}">
+            <i class="fas fa-wand-magic-sparkles"></i> <span data-i18n="modal.provider.detectModels">${t('modal.provider.detectModels')}</span>
         </button>
         <button class="btn-small btn-delete" onclick="window.deleteProvider('${uuid}', event)">
             <i class="fas fa-trash"></i> <span data-i18n="modal.provider.delete">${t('modal.provider.delete')}</span>
@@ -2434,6 +2638,7 @@ export {
     loadModelsForProviderType,
     renderNotSupportedModelsSelector,
     detectAndMergeNotSupportedModels,
+    viewProviderDetectedModels,
     goToProviderPage,
     performSingleHealthCheck,
     refreshProviderUuid
@@ -2456,5 +2661,6 @@ window.deleteUnhealthyProviders = deleteUnhealthyProviders;
 window.refreshUnhealthyUuids = refreshUnhealthyUuids;
 window.openSupportedModelsPicker = openSupportedModelsPicker;
 window.detectAndMergeNotSupportedModels = detectAndMergeNotSupportedModels;
+window.viewProviderDetectedModels = viewProviderDetectedModels;
 window.goToProviderPage = goToProviderPage;
 window.refreshProviderUuid = refreshProviderUuid;
