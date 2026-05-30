@@ -1250,6 +1250,15 @@
     margin-bottom: 12px;
 }
 
+.not-supported-models-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
 .supported-models-summary {
     font-size: 12px;
     color: var(--neutral-600);

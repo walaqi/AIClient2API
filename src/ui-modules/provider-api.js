@@ -426,11 +426,8 @@ export async function handleGetProviderTypeModels(req, res, currentConfig, provi
  */
 export async function handleDetectProviderModels(req, res, currentConfig, providerPoolManager, providerType, providerUuid) {
     try {
-        if (!usesManagedModelList(providerType)) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: { message: `Model detection is not supported for provider type: ${providerType}` } }));
-            return true;
-        }
+        // 模型检测不再仅限 managed 类型 provider；任何实现 listModels() 的适配器都可被探测。
+        // managed 类型保存到 supportedModels 白名单，其它类型仅作展示用于扩充 notSupportedModels 候选。
 
         const body = await getRequestBody(req);
         const draftConfig = normalizeProviderConfigFields(filterMaskedData(body?.providerConfig || {}));

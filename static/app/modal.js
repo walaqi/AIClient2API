@@ -1290,6 +1290,16 @@ function renderProviderConfig(provider) {
                 <i class="fas fa-ban"></i> <span data-i18n="modal.provider.unsupportedModels">不支持的模型</span>
                 <span class="help-text" data-i18n="modal.provider.unsupportedModelsHelp">选择此提供商不支持的模型，系统会自动排除这些模型</span>
             </label>
+            <div class="not-supported-models-toolbar">
+                <button type="button"
+                        class="btn btn-outline detect-models-btn"
+                        onclick="window.detectAndMergeNotSupportedModels('${currentProviderType}', '${provider.uuid}', event)"
+                        title="${escapeHtml(t('modal.provider.detectModelsHelp'))}"
+                        disabled>
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                    <span data-i18n="modal.provider.detectModels">${t('modal.provider.detectModels')}</span>
+                </button>
+            </div>
             <div class="not-supported-models-container" data-uuid="${provider.uuid}">
                 <div class="models-loading">
                     <i class="fas fa-spinner fa-spin"></i> <span data-i18n="modal.provider.loadingModels">加载模型列表...</span>
@@ -2287,6 +2297,87 @@ async function refreshUnhealthyUuids(providerType) {
 }
 
 /**
+ * 探测并合并"不支持的模型"候选列表（OAuth/原生 provider 用）。
+ * 调用上游 listModels()，把新增模型并入 cachedModels 与候选复选框，
+ * 已勾选的 notSupportedModels 状态保留。
+ * @param {string} providerType - 提供商类型
+ * @param {string} uuid - 提供商UUID
+ * @param {Event} event - 点击事件
+ */
+async function detectAndMergeNotSupportedModels(providerType, uuid, event) {
+    event.stopPropagation();
+
+    if (usesManagedModelList(providerType)) {
+        // managed 类型走 openSupportedModelsPicker，这里不应被触发
+        return;
+    }
+
+    const providerDetail = event.target.closest('.provider-item-detail, .provider-item-card');
+    if (!providerDetail) {
+        return;
+    }
+
+    const detectButton = providerDetail.querySelector('.detect-models-btn');
+    const originalHtml = detectButton?.innerHTML;
+    const draftProviderConfig = collectDraftProviderConfig(providerDetail, providerType, uuid);
+
+    try {
+        if (detectButton) {
+            detectButton.disabled = true;
+            detectButton.innerHTML = `<i class="fas fa-spinner fa-spin"></i> ${escapeHtml(t('common.loading'))}`;
+        }
+
+        const response = await window.apiClient.post(
+            `/providers/${encodeURIComponent(providerType)}/${uuid}/detect-models`,
+            { providerConfig: draftProviderConfig }
+        );
+
+        const detectedModels = Array.isArray(response.models) ? response.models : [];
+        if (detectedModels.length === 0) {
+            showToast(t('common.info'), t('modal.provider.detectModelsNoResults'), 'info');
+            return;
+        }
+
+        // 合并到 cachedModels（去重保序）
+        const merged = normalizeModelList([...cachedModels, ...detectedModels]);
+        const added = merged.filter(m => !cachedModels.includes(m));
+        cachedModels = merged;
+
+        // 计算新增数量并提示
+        const newCount = added.length;
+
+        // 重渲染当前编辑中的 provider 复选框区域，保留勾选状态
+        // 已勾选项以 DOM 实时状态为准，避免和 currentProviders 缓存中的过期值不一致
+        const checkedNow = Array.from(
+            providerDetail.querySelectorAll(`.model-checkbox[data-uuid="${uuid}"]:checked`)
+        ).map(cb => cb.value);
+
+        renderNotSupportedModelsSelector(uuid, cachedModels, checkedNow);
+
+        // 重新启用复选框（renderNotSupportedModelsSelector 默认渲染为 disabled）
+        if (providerDetail.classList.contains('editing')) {
+            providerDetail.querySelectorAll(`.model-checkbox[data-uuid="${uuid}"]`).forEach(cb => {
+                cb.disabled = false;
+            });
+        }
+
+        showToast(
+            t('common.success'),
+            t('modal.provider.detectModelsSuccess', { total: cachedModels.length, added: newCount }),
+            'success'
+        );
+    } catch (error) {
+        console.error('Failed to detect provider models:', error);
+        showToast(t('common.error'), t('modal.provider.detectModelsFailed') + ': ' + error.message, 'error');
+    } finally {
+        if (detectButton) {
+            detectButton.innerHTML = originalHtml;
+            detectButton.disabled = !providerDetail.classList.contains('editing');
+        }
+    }
+}
+
+/**
  * 渲染不支持的模型选择器（不调用API，直接使用传入的模型列表）
  * @param {string} uuid - 提供商UUID
  * @param {Array} models - 模型列表
@@ -2342,6 +2433,7 @@ export {
     openSupportedModelsPicker,
     loadModelsForProviderType,
     renderNotSupportedModelsSelector,
+    detectAndMergeNotSupportedModels,
     goToProviderPage,
     performSingleHealthCheck,
     refreshProviderUuid
@@ -2363,5 +2455,6 @@ window.performSingleHealthCheck = performSingleHealthCheck;
 window.deleteUnhealthyProviders = deleteUnhealthyProviders;
 window.refreshUnhealthyUuids = refreshUnhealthyUuids;
 window.openSupportedModelsPicker = openSupportedModelsPicker;
+window.detectAndMergeNotSupportedModels = detectAndMergeNotSupportedModels;
 window.goToProviderPage = goToProviderPage;
 window.refreshProviderUuid = refreshProviderUuid;
