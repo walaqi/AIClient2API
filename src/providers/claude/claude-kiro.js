@@ -901,17 +901,69 @@ const MODEL_MAPPING = Object.fromEntries(
     Object.entries(FULL_MODEL_MAPPING).filter(([key]) => KIRO_MODELS.includes(key))
 );
 
-// Phase 3.2: native thinking via additionalModelRequestFields 仅 Claude 4+ 支持.
-// Claude 3.x 不支持该字段; 旧的 inline tag 注入路径会被新协议服务端拒绝, 故直接跳过.
-function isClaudeFourOrLater(model) {
-    if (typeof model !== 'string') return false;
-    const lower = model.toLowerCase();
-    return lower.startsWith('claude-opus-4') ||
-        lower.startsWith('claude-sonnet-4') ||
-        lower.startsWith('claude-haiku-4');
+// Phase 3.2: native thinking via additionalModelRequestFields 仅高版本 Claude 支持.
+// Claude 3.x / 低版本 4.x 不支持该字段; 服务端会以 400 "not supported for this model" 拒绝, 故按版本门槛跳过.
+// 从 model-id 解析 Claude 主.次版本号, e.g. "claude-opus-4.7" / "claude-opus-4-7" -> { major:4, minor:7 }.
+// 解析不出返回 null. 同时容忍 family 前缀 (sonnet/opus/haiku) 与日期后缀.
+function parseClaudeVersion(model) {
+    if (typeof model !== 'string') return null;
+    const m = model.toLowerCase().match(/claude-(?:opus|sonnet|haiku)-(\d+)[.\-](\d+)/);
+    if (!m) return null;
+    const major = Number.parseInt(m[1], 10);
+    const minor = Number.parseInt(m[2], 10);
+    if (!Number.isFinite(major) || !Number.isFinite(minor)) return null;
+    return { major, minor };
+}
+
+// 版本是否 >= 给定的 (major, minor) 阈值.
+function isClaudeVersionAtLeast(model, major, minor) {
+    const v = parseClaudeVersion(model);
+    if (!v) return false;
+    if (v.major !== major) return v.major > major;
+    return v.minor >= minor;
+}
+
+// native thinking (additionalModelRequestFields) 的版本默认门槛: Claude >= 4.7.
+// 日志实测: opus-4.7 接受该字段; sonnet-4.5 / opus-4.5 返回 400 "not supported for this model".
+const NATIVE_THINKING_MIN_MAJOR = 4;
+const NATIVE_THINKING_MIN_MINOR = 7;
+
+// 解析单个模型的能力开关. 优先级: config.KIRO_MODEL_CAPABILITIES[model] > [default] > 版本默认.
+// 返回 { nativeThinking: bool, contextCompression: bool }.
+// model: 上游 model-id (codewhispererModel, e.g. "claude-opus-4.7"); rawModel: 客户端原始 id, 一并参与匹配.
+function getKiroModelCapabilities(config, model, rawModel = null) {
+    const caps = (config && typeof config.KIRO_MODEL_CAPABILITIES === 'object' && config.KIRO_MODEL_CAPABILITIES) || {};
+    const perModel = caps[model] || (rawModel ? caps[rawModel] : null) || null;
+    const defaults = (typeof caps.default === 'object' && caps.default) || {};
+
+    // nativeThinking: 显式配置 > default 配置 > 版本默认 (>= 4.7)
+    let nativeThinking;
+    if (perModel && typeof perModel.nativeThinking === 'boolean') {
+        nativeThinking = perModel.nativeThinking;
+    } else if (typeof defaults.nativeThinking === 'boolean') {
+        nativeThinking = defaults.nativeThinking;
+    } else {
+        nativeThinking = isClaudeVersionAtLeast(model, NATIVE_THINKING_MIN_MAJOR, NATIVE_THINKING_MIN_MINOR) ||
+            (rawModel ? isClaudeVersionAtLeast(rawModel, NATIVE_THINKING_MIN_MAJOR, NATIVE_THINKING_MIN_MINOR) : false);
+    }
+
+    // contextCompression: 显式配置 > default 配置 > 默认 true (保持现有行为)
+    let contextCompression;
+    if (perModel && typeof perModel.contextCompression === 'boolean') {
+        contextCompression = perModel.contextCompression;
+    } else if (typeof defaults.contextCompression === 'boolean') {
+        contextCompression = defaults.contextCompression;
+    } else {
+        contextCompression = true;
+    }
+
+    return { nativeThinking, contextCompression };
 }
 
 const KIRO_AUTH_TOKEN_FILE = "kiro-auth-token.json";
+
+// 导出纯函数供单元测试 (无副作用).
+export { parseClaudeVersion, isClaudeVersionAtLeast, getKiroModelCapabilities };
 
 /**
  * Kiro API Service - Node.js implementation based on the Python ki2api
@@ -1911,8 +1963,23 @@ async saveCredentialsToFile(filePath, newData) {
             }
         }
 
-        // 措施 2/3: 获取输出预留配置
+        // 相邻同 role 合并 已移除 — Phase 2.3 sanitize pipeline 的 ensureAlternatingMessages 处理
+        const codewhispererModel = MODEL_MAPPING[model] || model;
+
+        // 按 model-id 解析能力开关 (nativeThinking / contextCompression).
+        const modelCaps = getKiroModelCapabilities(this.config, codewhispererModel, model);
+
+        // 措施 2/3: 获取输出预留配置.
+        // contextCompression=false 时跳过「工具结果截断」与「工具描述自适应缩短」两项压缩措施
+        // (高容量模型如 opus-4.7 上下文 1M, 无需为输出腾空间而压缩输入).
         const reserve = getOutputReserveConfig(this.config);
+        if (!modelCaps.contextCompression) {
+            if (reserve.truncateOn || reserve.adaptiveDesc) {
+                logger.info(`[Kiro] contextCompression=false for ${codewhispererModel}: skipping tool_result truncate + adaptive tool desc`);
+            }
+            reserve.truncateOn = false;
+            reserve.adaptiveDesc = false;
+        }
 
         // 措施 2: 构建 tool_use_id → 工具名映射（用于 tool_result 智能截断）
         const toolUseIdToName = new Map();
@@ -1928,7 +1995,6 @@ async saveCredentialsToFile(filePath, newData) {
         }
 
         // 相邻同 role 合并 已移除 — Phase 2.3 sanitize pipeline 的 ensureAlternatingMessages 处理
-        const codewhispererModel = MODEL_MAPPING[model] || model;
         const toolNameMaps = buildKiroToolNameMaps(tools);
         
         // Phase 2.5: web_search/websearch 过滤已移除 (commit 3e071d4 已迁移到 Kiro 原生 tool spec);
@@ -2223,10 +2289,11 @@ async saveCredentialsToFile(filePath, newData) {
         }
 
         // Phase 3.2: native thinking via additionalModelRequestFields.
-        // 仅 Claude 4+ 支持; Claude 3.x 跳过 (服务端会拒绝该字段).
+        // 仅高版本模型支持 (默认 Claude >= 4.7, 可经 KIRO_MODEL_CAPABILITIES 逐模型覆盖).
+        // 日志实测: opus-4.7 接受该字段; sonnet-4.5 / opus-4.5 返回 400 "not supported for this model".
         // 输入形态: { type: 'enabled', budget_tokens } | { type: 'adaptive', effort? } | { type: 'disabled' }
         // Kiro 0.12 服务端 enum 只接受 ["adaptive", "disabled"], 'enabled' 一并归到 'adaptive'.
-        if (thinking && typeof thinking === 'object' && isClaudeFourOrLater(codewhispererModel)) {
+        if (thinking && typeof thinking === 'object' && modelCaps.nativeThinking) {
             const ttype = String(thinking.type || '').toLowerCase().trim();
             if (ttype === 'enabled' || ttype === 'adaptive') {
                 request.additionalModelRequestFields = {

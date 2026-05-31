@@ -75,5 +75,11 @@
     "OUTPUT_RESERVE_CONTEXT_PRESSURE": 1.0,
     "OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE": false,
     "OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS": 8192,
-    "OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE": false
+    "OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE": false,
+
+    "_KIRO_MODEL_CAPABILITIES_NOTES_": "按 model-id 控制 Kiro 行为。nativeThinking: 是否下发 additionalModelRequestFields(thinking)，省略时按版本自动判定 (Claude >= 4.7；实测 4.5/4.6 会返回 400 'not supported for this model'，故自动跳过)。contextCompression: false 时对该模型跳过工具结果截断 + 工具描述自适应缩短 (适合 opus-4.7/4.8 等 1M 上下文模型)，省略时默认 true。key 可用上游 id (claude-opus-4.7) 或客户端 id；'default' 作用于所有未单列模型；per-model 优先级高于 default。整体省略该配置则全部走版本默认。",
+    "KIRO_MODEL_CAPABILITIES": {
+        "claude-opus-4.7": { "contextCompression": false },
+        "claude-opus-4.8": { "contextCompression": false }
+    }
 }
