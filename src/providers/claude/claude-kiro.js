@@ -3120,12 +3120,12 @@ async saveCredentialsToFile(filePath, newData) {
             }
             // [F3] 与流式 (claude-kiro.js:3912-3920) 同口径: 优先用上游 contextUsagePercentage 推 inputTokens,
             // 否则回落到本地 estimateInputTokens。两条路径同分母, calculateCacheTokens 反算结果可比。
+            // 实测确认: contextUsagePercentage 只反映输入侧已用上下文, 不含本次 output, 故不减 estOutputTokens。
             let inputTokens;
             if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
                 const contextTokens = getContextTokensForModel(model, this.config, finalModel);
-                const totalTokens = Math.round(contextTokens * contextUsagePercentage / 100);
-                inputTokens = Math.max(0, totalTokens - estOutputTokens);
-                logger.info(`[Kiro] Non-stream token calc from contextUsagePercentage: total=${totalTokens}, output=${estOutputTokens}, input=${inputTokens}`);
+                inputTokens = Math.round(contextTokens * contextUsagePercentage / 100);
+                logger.info(`[Kiro] Non-stream token calc from contextUsagePercentage: input=${inputTokens}, output=${estOutputTokens}`);
             } else {
                 inputTokens = estimatedInputTokens;
             }
@@ -4088,14 +4088,11 @@ async saveCredentialsToFile(filePath, newData) {
             }
 
             // 计算 input tokens
-            // contextUsagePercentage 是包含输入和输出的总使用量百分比
-            // 总 token = TOTAL_CONTEXT_TOKENS * contextUsagePercentage / 100
-            // input token = 总 token - output token
-            let totalTokens = null;
+            // 实测确认: contextUsagePercentage 只反映输入侧已用上下文，不含本次 output。
+            // 所以 contextTokens * pct / 100 换算出的就是 input tokens，不能再减 output。
             if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
                 const contextTokens = getContextTokensForModel(model, this.config, finalModel);
-                totalTokens = Math.round(contextTokens * contextUsagePercentage / 100);
-                inputTokens = Math.max(0, totalTokens - outputTokens);
+                inputTokens = Math.round(contextTokens * contextUsagePercentage / 100);
             } else {
                 logger.warn('[Kiro Stream] contextUsagePercentage not received, using estimation');
                 inputTokens = estimatedInputTokens;
@@ -4109,7 +4106,7 @@ async saveCredentialsToFile(filePath, newData) {
 
             // cache_creation / cache_read 由 meteringCredits 反算得出（非 contextUsagePercentage）。
             // 反算结束后在此汇总输出全部 token 结果。
-            logger.info(`[Kiro] Token calculation from meteringCredits: total=${totalTokens}, input=${inputTokens}, output=${outputTokens}, cacheCreation=${cacheCreationTokens}, cacheRead=${cacheReadTokens}, nonCached=${nonCachedInputTokens}`);
+            logger.info(`[Kiro] Token calculation from meteringCredits: input=${inputTokens}, output=${outputTokens}, cacheCreation=${cacheCreationTokens}, cacheRead=${cacheReadTokens}, nonCached=${nonCachedInputTokens}`);
 
             // 措施 1: 上下文压力膨胀（仅 message_delta）
             const reserve = getOutputReserveConfig(this.config);
