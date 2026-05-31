@@ -13,7 +13,7 @@ import { broadcastEvent } from './event-broadcast.js';
 import { getRegisteredProviders, getServiceAdapter, invalidateServiceAdapter, serviceInstances } from '../providers/adapter.js';
 import { withFileLock, atomicWriteFile } from '../utils/file-lock.js';
 import { normalizeProviderConfigFields } from '../utils/provider-config-normalizer.js';
-import { persistDetectedModels } from './custom-models-api.js';
+import { saveDetectedModels } from '../providers/detected-models-store.js';
 
 
 
@@ -462,20 +462,30 @@ export async function handleDetectProviderModels(req, res, currentConfig, provid
             delete serviceInstances[instanceKey];
         }
 
-        // 自动落盘：把上游返回的、本仓库 PROVIDER_MODELS 里没有的"新模型"写进
-        // custom_models.json，这样它们会被 getProviderModels() 注入运行时清单，
-        // "模型测试"等下拉里立即可见。冲突保留现有项，不覆盖。
+        // 自动落盘到 detect-models 探测缓存（configs/detected_models.json）。
+        // 该缓存会被 getProviderModels() 作为"优先源"覆盖硬编码清单，
+        // "模型测试"等下拉里立即生效；不再污染 custom_models.json（那是人工映射）。
         // managed 类型 (openai-custom 等) 走自己的 supportedModels 白名单流程，不在这里落盘。
-        let persisted = { added: [], skipped: [] };
+        let persistedAddedIds = [];
         if (!usesManagedModelList(providerType) && models.length > 0) {
             try {
-                const builtinModels = new Set(getProviderModels(providerType));
-                const newModels = models.filter(m => !builtinModels.has(m));
-                if (newModels.length > 0) {
-                    persisted = await persistDetectedModels(currentConfig, providerType, newModels);
-                }
+                // 落盘前先算出"相对当前已知清单的新增"，用于 UI 高亮（落盘后清单会被覆盖）
+                const knownBefore = new Set(getProviderModels(providerType));
+                persistedAddedIds = models.filter(m => !knownBefore.has(m));
+
+                // 整组覆盖该 provider 的探测缓存（检测结果即权威的当前上游清单）
+                await saveDetectedModels(currentConfig, providerType, models);
+
+                broadcastEvent('config_update', {
+                    action: 'detected_models_updated',
+                    providerType,
+                    count: models.length,
+                    added: persistedAddedIds,
+                    timestamp: new Date().toISOString()
+                });
             } catch (persistError) {
-                logger.warn(`[UI API] persistDetectedModels failed for ${providerType}/${providerUuid}: ${persistError.message}`);
+                logger.warn(`[UI API] saveDetectedModels failed for ${providerType}/${providerUuid}: ${persistError.message}`);
+                persistedAddedIds = [];
             }
         }
 
@@ -488,8 +498,8 @@ export async function handleDetectProviderModels(req, res, currentConfig, provid
             models,
             selectedModels: getConfiguredSupportedModels(providerType, existingProvider),
             persisted: {
-                added: persisted.added.map(m => m.id),
-                skipped: persisted.skipped
+                added: persistedAddedIds,
+                skipped: []
             }
         }));
         return true;

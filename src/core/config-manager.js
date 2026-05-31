@@ -161,6 +161,7 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         PROVIDER_POOLS_FILE_PATH: null, // 新增号池配置文件路径
         MAX_ERROR_COUNT: 10, // 提供商最大错误次数
         CUSTOM_MODELS_FILE_PATH: null, // 自定义模型配置文件路径
+        DETECTED_MODELS_FILE_PATH: null, // detect-models 探测缓存文件路径
         SYSTEM_PROMPT_REPLACEMENTS: [], // 系统提示词内容替换规则，例如: [{"old": "AI", "new": "Bot"}, {"old": "OpenAI", "new": "Gemini"}]
         SCHEDULED_HEALTH_CHECK: {
             enabled: false,
@@ -312,6 +313,24 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
     } catch (error) {
         logger.error(`[Config Error] Failed to load custom models from ${currentConfig.CUSTOM_MODELS_FILE_PATH}: ${error.message}`);
         currentConfig.customModels = [];
+    }
+
+    // 加载 detect-models 探测缓存（与 custom_models 职责分离：这里只放纯模型 ID 列表）
+    if (!currentConfig.DETECTED_MODELS_FILE_PATH) {
+        currentConfig.DETECTED_MODELS_FILE_PATH = 'configs/detected_models.json';
+    }
+    try {
+        if (fs.existsSync(currentConfig.DETECTED_MODELS_FILE_PATH)) {
+            const detectedModelsData = fs.readFileSync(currentConfig.DETECTED_MODELS_FILE_PATH, 'utf8');
+            const parsed = JSON.parse(detectedModelsData);
+            currentConfig.detectedModels = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+            logger.info(`[Config] Loaded detected models from ${currentConfig.DETECTED_MODELS_FILE_PATH}`);
+        } else {
+            currentConfig.detectedModels = {};
+        }
+    } catch (error) {
+        logger.error(`[Config Error] Failed to load detected models from ${currentConfig.DETECTED_MODELS_FILE_PATH}: ${error.message}`);
+        currentConfig.detectedModels = {};
     }
 
     await loadOrMigrateProxyGeoRules(currentConfig, configFilePath);

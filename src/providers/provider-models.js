@@ -1,6 +1,7 @@
 import { convertData } from '../convert/convert.js';
 import { MODEL_PROVIDER } from '../utils/common.js';
 import { CONFIG } from '../core/config-manager.js';
+import { getDetectedModelsForProvider } from './detected-models-store.js';
 
 /**
  * 获取模型配置元数据
@@ -239,7 +240,14 @@ export function getConfiguredSupportedModels(providerType, providerConfig = {}) 
  */
 export function getProviderModels(providerType) {
     let models = [];
-    if (PROVIDER_MODELS[providerType]) {
+
+    // 优先级：detect-models 探测缓存 > 硬编码 PROVIDER_MODELS。
+    // 缓存命中（即用户对该 provider 跑过检测）时，以探测到的真实上游清单为准；
+    // 否则回落到项目内置的硬编码清单。
+    const detected = getDetectedModelsForProvider(providerType);
+    if (detected && detected.length > 0) {
+        models = [...detected];
+    } else if (PROVIDER_MODELS[providerType]) {
         models = [...PROVIDER_MODELS[providerType]];
     } else {
         // 尝试前缀匹配 (例如 openai-custom-1 -> openai-custom)
@@ -251,7 +259,7 @@ export function getProviderModels(providerType) {
         }
     }
 
-    // 注入自定义模型
+    // 注入自定义模型（custom_models.json 中的人工映射，始终叠加在上）
     if (CONFIG.customModels && Array.isArray(CONFIG.customModels)) {
         CONFIG.customModels.forEach(m => {
             // 匹配模型列表归属提供商或其后缀分组
@@ -275,31 +283,45 @@ export function getAllProviderModels() {
     // 执行深拷贝，避免修改原始 PROVIDER_MODELS 对象
     const allModels = {};
     for (const provider in PROVIDER_MODELS) {
-        allModels[provider] = [...PROVIDER_MODELS[provider]];
+        // detect-models 探测缓存优先；命中则覆盖硬编码清单
+        const detected = getDetectedModelsForProvider(provider);
+        allModels[provider] = (detected && detected.length > 0)
+            ? [...detected]
+            : [...PROVIDER_MODELS[provider]];
     }
-    
+
+    // 探测缓存中可能存在 PROVIDER_MODELS 没有的 provider 类型（如动态后缀分组），补进来
+    const detectedMap = CONFIG.detectedModels;
+    if (detectedMap && typeof detectedMap === 'object') {
+        for (const [provider, models] of Object.entries(detectedMap)) {
+            if (!allModels[provider] && Array.isArray(models) && models.length > 0) {
+                allModels[provider] = [...models];
+            }
+        }
+    }
+
     // 合并自定义模型到对应的提供商
     if (CONFIG.customModels && Array.isArray(CONFIG.customModels)) {
         CONFIG.customModels.forEach(m => {
             // 如果指定了模型列表归属提供商，注入到该提供商
             // 如果没有指定（Auto），则注入到特殊的虚拟分组
             const targetProvider = getCustomModelListProvider(m) || 'custom-auto';
-            
+
             if (!allModels[targetProvider]) {
                 allModels[targetProvider] = [];
             }
-            
+
             // 注入 ID
             if (!allModels[targetProvider].includes(m.id)) {
                 allModels[targetProvider].push(m.id);
             }
         });
     }
-    
+
     // 对每个列表进行排序
     for (const provider in allModels) {
         allModels[provider] = normalizeModelIds(allModels[provider]);
     }
-    
+
     return allModels;
 }
