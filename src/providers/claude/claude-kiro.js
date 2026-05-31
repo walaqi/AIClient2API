@@ -3062,6 +3062,13 @@ async saveCredentialsToFile(filePath, newData) {
             delete requestBody._requestBaseUrl;
         }
 
+        // 客户端提交的原始 model id（自定义模型映射前），用于价格反算查表。
+        // 上游合法模型为 claude-opus-4.8，但价格表/客户端均用 claude-opus-4-8，
+        // 映射后的 model 查不到价格，必须用映射前的客户端 id。
+        // 不 delete：凭证切换重试会复用同一 requestBody，删掉会让重试请求丢失计价 id。
+        // 该字段不会进入上游请求（buildCodewhispererRequest 只读 messages/tools/system/thinking）。
+        const pricingModel = requestBody._clientModelId || model;
+
         // 检查 token 是否即将过期，如果是则推送到刷新队列
         if (this.isExpiryDateNear()) {
             logger.info('[Kiro] Token is near expiry, marking credential as need refresh...');
@@ -3122,7 +3129,7 @@ async saveCredentialsToFile(filePath, newData) {
             } else {
                 inputTokens = estimatedInputTokens;
             }
-            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, estOutputTokens, model);
+            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, estOutputTokens, pricingModel);
             const cacheTokens = { cacheCreationTokens, cacheReadTokens };
             return this.buildClaudeResponse(contentForClaude, false, 'assistant', model, toolCalls, inputTokens, cacheTokens);
         } catch (error) {
@@ -3467,7 +3474,14 @@ async saveCredentialsToFile(filePath, newData) {
         if (requestBody._requestBaseUrl) {
             delete requestBody._requestBaseUrl;
         }
-        
+
+        // 客户端提交的原始 model id（自定义模型映射前），用于价格反算查表。
+        // 上游合法模型为 claude-opus-4.8，但价格表/客户端均用 claude-opus-4-8，
+        // 映射后的 model 查不到价格，必须用映射前的客户端 id。
+        // 不 delete：凭证切换重试会复用同一 requestBody，删掉会让重试请求丢失计价 id。
+        // 该字段不会进入上游请求（buildCodewhispererRequest 只读 messages/tools/system/thinking）。
+        const pricingModel = requestBody._clientModelId || model;
+
         // 检查 token 是否即将过期，如果是则推送到刷新队列
         if (this.isExpiryDateNear()) {
             logger.info('[Kiro] Token is near expiry, marking credential as need refresh...');
@@ -4077,20 +4091,25 @@ async saveCredentialsToFile(filePath, newData) {
             // contextUsagePercentage 是包含输入和输出的总使用量百分比
             // 总 token = TOTAL_CONTEXT_TOKENS * contextUsagePercentage / 100
             // input token = 总 token - output token
+            let totalTokens = null;
             if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
                 const contextTokens = getContextTokensForModel(model, this.config, finalModel);
-                const totalTokens = Math.round(contextTokens * contextUsagePercentage / 100);
+                totalTokens = Math.round(contextTokens * contextUsagePercentage / 100);
                 inputTokens = Math.max(0, totalTokens - outputTokens);
-                logger.info(`[Kiro] Token calculation from contextUsagePercentage: total=${totalTokens}, output=${outputTokens}, input=${inputTokens}`);
             } else {
                 logger.warn('[Kiro Stream] contextUsagePercentage not received, using estimation');
                 inputTokens = estimatedInputTokens;
             }
 
             // 4. 反算缓存 token
-            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, outputTokens, model);
+            // 用映射前的客户端 model id 查价格表（映射后的 id 不在价格表里）。
+            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, outputTokens, pricingModel);
             // Claude API 语义: total_input = input_tokens + cache_creation + cache_read
             const nonCachedInputTokens = Math.max(0, inputTokens - cacheCreationTokens - cacheReadTokens);
+
+            // cache_creation / cache_read 由 meteringCredits 反算得出（非 contextUsagePercentage）。
+            // 反算结束后在此汇总输出全部 token 结果。
+            logger.info(`[Kiro] Token calculation from meteringCredits: total=${totalTokens}, input=${inputTokens}, output=${outputTokens}, cacheCreation=${cacheCreationTokens}, cacheRead=${cacheReadTokens}, nonCached=${nonCachedInputTokens}`);
 
             // 措施 1: 上下文压力膨胀（仅 message_delta）
             const reserve = getOutputReserveConfig(this.config);

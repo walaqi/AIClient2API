@@ -1486,7 +1486,13 @@ export async function handleContentGenerationRequest(req, res, service, endpoint
     if (!model) {
         throw new Error("Could not determine the model from the request.");
     }
-    
+
+    // 记录客户端提交的原始 model id（自定义模型映射前）。
+    // 下游（如 Kiro 价格反算）按客户端 id 查价格表：
+    // 上游合法模型列表为 claude-opus-4.8，但价格表与客户端均用 claude-opus-4-8，
+    // 映射后的 id 查不到价格，必须用映射前的客户端 id 反算。
+    const clientModelId = model;
+
     // 2.1. 处理自定义模型映射和别名
     const customModelConfig = getCustomModelConfig(model, CONFIG.MODEL_PROVIDER);
     CONFIG.customConfig = customModelConfig || null;
@@ -1544,6 +1550,11 @@ export async function handleContentGenerationRequest(req, res, service, endpoint
     // 将 _monitorRequestId 注入到 requestBody 中，以便在 service 内部访问
     if (CONFIG._monitorRequestId) {
         processedRequestBody._monitorRequestId = CONFIG._monitorRequestId;
+    }
+
+    // 注入客户端原始 model id（映射前），供下游价格反算按客户端 id 查表
+    if (clientModelId && clientModelId !== model) {
+        processedRequestBody._clientModelId = clientModelId;
     }
     
     // 将 requestBaseUrl 注入到 requestBody 中，以便在转换器中使用
