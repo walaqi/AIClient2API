@@ -88,6 +88,49 @@
                                 <td>-</td>
                                 <td data-i18n="tutorial.main.basic.provider">默认模型提供商</td>
                             </tr>
+                            <tr>
+                                <td><code>UI_ENABLED</code></td>
+                                <td>boolean</td>
+                                <td>true</td>
+                                <td data-i18n="tutorial.main.basic.uiEnabled">是否启用 Web UI 控制台</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 系统提示设置 -->
+            <div class="config-section">
+                <h4 data-i18n="tutorial.main.prompt.title">系统提示配置</h4>
+                <div class="config-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th data-i18n="tutorial.main.table.param">参数</th>
+                                <th data-i18n="tutorial.main.table.type">类型</th>
+                                <th data-i18n="tutorial.main.table.default">默认值</th>
+                                <th data-i18n="tutorial.main.table.desc">说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>SYSTEM_PROMPT_FILE_PATH</code></td>
+                                <td>string</td>
+                                <td>-</td>
+                                <td data-i18n="tutorial.main.prompt.file">系统提示文件路径</td>
+                            </tr>
+                            <tr>
+                                <td><code>SYSTEM_PROMPT_MODE</code></td>
+                                <td>string</td>
+                                <td>overwrite</td>
+                                <td data-i18n="tutorial.main.prompt.mode">系统提示模式：overwrite(覆盖) 或 append(追加)</td>
+                            </tr>
+                            <tr>
+                                <td><code>SYSTEM_PROMPT_REPLACEMENTS</code></td>
+                                <td>array</td>
+                                <td>[]</td>
+                                <td data-i18n="tutorial.main.prompt.replacements">系统提示文本替换规则，每项含 old/new 字段</td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -166,10 +209,34 @@
                                 <td data-i18n="tutorial.main.retry.rateLimitCooldownMs">429 默认冷却时间（毫秒）</td>
                             </tr>
                             <tr>
+                                <td><code>RATE_LIMIT_COOLDOWN_JITTER_MS</code></td>
+                                <td>number</td>
+                                <td>5000</td>
+                                <td data-i18n="tutorial.main.retry.rateLimitCooldownJitter">冷却时间随机抖动上限（毫秒），避免同时恢复</td>
+                            </tr>
+                            <tr>
+                                <td><code>RATE_LIMIT_COOLDOWN_MAX_MS</code></td>
+                                <td>number</td>
+                                <td>300000</td>
+                                <td data-i18n="tutorial.main.retry.rateLimitCooldownMax">冷却时间上限（毫秒）</td>
+                            </tr>
+                            <tr>
                                 <td><code>MAX_ERROR_COUNT</code></td>
                                 <td>number</td>
                                 <td>10</td>
                                 <td data-i18n="tutorial.main.retry.error">提供商最大错误次数，超过后标记为不健康</td>
+                            </tr>
+                            <tr>
+                                <td><code>CRON_NEAR_MINUTES</code></td>
+                                <td>number</td>
+                                <td>1</td>
+                                <td data-i18n="tutorial.main.governance.cronNear">凭证临近过期多少分钟内触发自动刷新</td>
+                            </tr>
+                            <tr>
+                                <td><code>CRON_REFRESH_TOKEN</code></td>
+                                <td>boolean</td>
+                                <td>false</td>
+                                <td data-i18n="tutorial.main.governance.cronRefresh">是否启用定时自动刷新 Token</td>
                             </tr>
                             <tr>
                                 <td><code>WARMUP_TARGET</code></td>
@@ -182,6 +249,43 @@
                                 <td>number</td>
                                 <td>1</td>
                                 <td data-i18n="tutorial.main.governance.concurrency">提供商内刷新并发数</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- 文件路径设置 -->
+            <div class="config-section">
+                <h4 data-i18n="tutorial.main.paths.title">文件路径配置</h4>
+                <div class="config-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th data-i18n="tutorial.main.table.param">参数</th>
+                                <th data-i18n="tutorial.main.table.type">类型</th>
+                                <th data-i18n="tutorial.main.table.default">默认值</th>
+                                <th data-i18n="tutorial.main.table.desc">说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>PROVIDER_POOLS_FILE_PATH</code></td>
+                                <td>string</td>
+                                <td>configs/provider_pools.json</td>
+                                <td data-i18n="tutorial.main.paths.pools">提供商池配置文件路径</td>
+                            </tr>
+                            <tr>
+                                <td><code>CUSTOM_MODELS_FILE_PATH</code></td>
+                                <td>string</td>
+                                <td>configs/custom_models.json</td>
+                                <td data-i18n="tutorial.main.paths.custom">自定义模型配置文件路径</td>
+                            </tr>
+                            <tr>
+                                <td><code>DETECTED_MODELS_FILE_PATH</code></td>
+                                <td>string</td>
+                                <td>configs/detected_models.json</td>
+                                <td data-i18n="tutorial.main.paths.detected">模型自动检测结果缓存文件路径</td>
                             </tr>
                         </tbody>
                     </table>
@@ -216,6 +320,41 @@
                                 <td>string</td>
                                 <td data-i18n="tutorial.log.mode">提示词日志模式：none(关闭)、console(控制台)、file(文件)</td>
                             </tr>
+                            <tr>
+                                <td><code>PROMPT_LOG_BASE_NAME</code></td>
+                                <td>string</td>
+                                <td data-i18n="tutorial.main.log.promptBaseName">提示词日志文件基础名称</td>
+                            </tr>
+                            <tr>
+                                <td><code>LOG_LEVEL</code></td>
+                                <td>string</td>
+                                <td data-i18n="tutorial.main.log.level">日志级别 (debug/info/warn/error)</td>
+                            </tr>
+                            <tr>
+                                <td><code>LOG_DIR</code></td>
+                                <td>string</td>
+                                <td data-i18n="tutorial.main.log.dir">日志文件存放目录</td>
+                            </tr>
+                            <tr>
+                                <td><code>LOG_INCLUDE_REQUEST_ID</code></td>
+                                <td>boolean</td>
+                                <td data-i18n="tutorial.main.log.includeRequestId">日志中是否包含请求 ID</td>
+                            </tr>
+                            <tr>
+                                <td><code>LOG_INCLUDE_TIMESTAMP</code></td>
+                                <td>boolean</td>
+                                <td data-i18n="tutorial.main.log.includeTimestamp">日志中是否包含时间戳</td>
+                            </tr>
+                            <tr>
+                                <td><code>LOG_MAX_FILE_SIZE</code></td>
+                                <td>number</td>
+                                <td data-i18n="tutorial.main.log.maxSize">单个日志文件最大字节数，超过后轮转</td>
+                            </tr>
+                            <tr>
+                                <td><code>LOG_MAX_FILES</code></td>
+                                <td>number</td>
+                                <td data-i18n="tutorial.main.log.maxFiles">保留的日志文件数量上限</td>
+                            </tr>
                         </tbody>
                     </table>
                 </div>
@@ -227,14 +366,20 @@
     "REQUIRED_API_KEY": "your-api-key",
     "SERVER_PORT": 3000,
     "HOST": "0.0.0.0",
-    "MODEL_PROVIDER": "gemini-cli-oauth,claude-kiro-oauth",
-    "PROXY_URL": "http://127.0.0.1:7890",
-    "PROXY_ENABLED_PROVIDERS": ["gemini-cli-oauth", "claude-kiro-oauth"],
+    "MODEL_PROVIDER": "gemini-cli-oauth",
+    "SYSTEM_PROMPT_FILE_PATH": "configs/input_system_prompt.txt",
+    "SYSTEM_PROMPT_MODE": "overwrite",
+    "PROMPT_LOG_MODE": "none",
     "REQUEST_MAX_RETRIES": 3,
-    "MAX_ERROR_COUNT": 10,
-    "WARMUP_TARGET": 5,
+    "RATE_LIMIT_COOLDOWN_ENABLED": false,
+    "RATE_LIMIT_COOLDOWN_MS": 30000,
+    "CRON_REFRESH_TOKEN": false,
+    "MAX_ERROR_COUNT": 3,
+    "PROXY_URL": "http://127.0.0.1:7890",
+    "PROXY_ENABLED_PROVIDERS": ["gemini-cli-oauth", "gemini-antigravity"],
     "LOG_ENABLED": true,
-    "LOG_OUTPUT_MODE": "all"
+    "LOG_OUTPUT_MODE": "all",
+    "LOG_LEVEL": "info"
 }</code></pre>
             </div>
         </div>
@@ -353,6 +498,168 @@
         }
     }
 }</code></pre>
+            </div>
+        </div>
+    </div>
+
+    <!-- 高级调优 (Kiro / TLS) -->
+    <div class="tutorial-panel">
+        <h3><i class="fas fa-sliders-h"></i> <span data-i18n="tutorial.advanced.title">高级调优</span></h3>
+        <div class="tutorial-content">
+            <p data-i18n="tutorial.advanced.desc">以下为可选的进阶配置，省略时全部走安全默认值。除非有明确需求，否则无需设置。</p>
+
+            <div class="config-section">
+                <h4 data-i18n="tutorial.advanced.kiro.title">Kiro 模型能力 (KIRO_MODEL_CAPABILITIES)</h4>
+                <p data-i18n="tutorial.advanced.kiro.desc">按 model-id 控制 claude-kiro-oauth 的行为。key 可用上游 id (如 claude-opus-4.7) 或客户端 id；<code>default</code> 作用于所有未单列模型，per-model 优先级更高。整体省略则全部走版本默认。</p>
+                <div class="config-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th data-i18n="tutorial.main.table.param">参数</th>
+                                <th data-i18n="tutorial.main.table.type">类型</th>
+                                <th data-i18n="tutorial.main.table.desc">说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>nativeThinking</code></td>
+                                <td>boolean</td>
+                                <td data-i18n="tutorial.advanced.kiro.nativeThinking">是否下发 additionalModelRequestFields(thinking)。省略时按版本自动判定 (Claude >= 4.7；4.5/4.6 会返回 400，故自动跳过)</td>
+                            </tr>
+                            <tr>
+                                <td><code>contextCompression</code></td>
+                                <td>boolean</td>
+                                <td data-i18n="tutorial.advanced.kiro.contextCompression">false 时对该模型跳过工具结果截断 + 工具描述自适应缩短 (适合 1M 上下文模型)，省略时默认 true</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <pre><code>{
+    "KIRO_MODEL_CAPABILITIES": {
+        "claude-opus-4.7": { "contextCompression": false },
+        "claude-opus-4.8": { "contextCompression": false }
+    }
+}</code></pre>
+            </div>
+
+            <div class="config-section">
+                <h4 data-i18n="tutorial.advanced.kiroOther.title">Kiro 输出/上下文调优</h4>
+                <div class="config-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th data-i18n="tutorial.main.table.param">参数</th>
+                                <th data-i18n="tutorial.main.table.type">类型</th>
+                                <th data-i18n="tutorial.main.table.default">默认值</th>
+                                <th data-i18n="tutorial.main.table.desc">说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>tokenBufferReserve</code></td>
+                                <td>number</td>
+                                <td>50000</td>
+                                <td data-i18n="tutorial.advanced.kiro.tokenBuffer">历史裁剪的 token 缓冲预留，裁剪上限 = 模型上下文 - 该值；取值会被 clamp 到 [5000, 150000]</td>
+                            </tr>
+                            <tr>
+                                <td><code>OUTPUT_RESERVE_CONTEXT_PRESSURE</code></td>
+                                <td>number</td>
+                                <td>1.0</td>
+                                <td data-i18n="tutorial.advanced.kiro.contextPressure">上下文压力系数，用于缓解输出截断</td>
+                            </tr>
+                            <tr>
+                                <td><code>OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE</code></td>
+                                <td>boolean</td>
+                                <td>false</td>
+                                <td data-i18n="tutorial.advanced.kiro.toolTruncate">是否截断过长的工具结果</td>
+                            </tr>
+                            <tr>
+                                <td><code>OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS</code></td>
+                                <td>number</td>
+                                <td>8192</td>
+                                <td data-i18n="tutorial.advanced.kiro.toolMaxChars">工具结果截断时保留的最大字符数</td>
+                            </tr>
+                            <tr>
+                                <td><code>OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE</code></td>
+                                <td>boolean</td>
+                                <td>false</td>
+                                <td data-i18n="tutorial.advanced.kiro.toolDescAdaptive">是否对工具描述进行自适应缩短</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <p class="file-desc" data-i18n="tutorial.advanced.kiro.note">以上 OUTPUT_RESERVE_* 默认全部关闭，仅作用于 claude-kiro-oauth provider，用于缓解输出被截断的问题。</p>
+            </div>
+
+            <div class="config-section">
+                <h4 data-i18n="tutorial.advanced.tls.title">TLS Sidecar</h4>
+                <div class="config-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th data-i18n="tutorial.main.table.param">参数</th>
+                                <th data-i18n="tutorial.main.table.type">类型</th>
+                                <th data-i18n="tutorial.main.table.default">默认值</th>
+                                <th data-i18n="tutorial.main.table.desc">说明</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>TLS_SIDECAR_ENABLED</code></td>
+                                <td>boolean</td>
+                                <td>false</td>
+                                <td data-i18n="tutorial.advanced.tls.enabled">是否启用 TLS sidecar 代理</td>
+                            </tr>
+                            <tr>
+                                <td><code>TLS_SIDECAR_PORT</code></td>
+                                <td>number</td>
+                                <td>9090</td>
+                                <td data-i18n="tutorial.advanced.tls.port">TLS sidecar 监听端口</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Grok 鉴权配置 -->
+    <div class="tutorial-panel">
+        <h3><i class="fas fa-robot"></i> <span data-i18n="tutorial.grok.title">Grok 鉴权配置</span></h3>
+        <div class="tutorial-content">
+            <p data-i18n="tutorial.grok.desc">使用 Grok 提供商时，需从浏览器中提取 Cookie 等鉴权信息：</p>
+            <div class="config-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th data-i18n="tutorial.main.table.param">参数</th>
+                            <th data-i18n="tutorial.main.table.type">类型</th>
+                            <th data-i18n="tutorial.main.table.desc">说明</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>GROK_COOKIE_TOKEN</code></td>
+                            <td>string</td>
+                            <td data-i18n="tutorial.grok.cookie">Grok SSO Cookie token</td>
+                        </tr>
+                        <tr>
+                            <td><code>GROK_CF_CLEARANCE</code></td>
+                            <td>string</td>
+                            <td data-i18n="tutorial.grok.cfClearance">Cloudflare cf_clearance Cookie</td>
+                        </tr>
+                        <tr>
+                            <td><code>GROK_USER_AGENT</code></td>
+                            <td>string</td>
+                            <td data-i18n="tutorial.grok.userAgent">与 Cookie 匹配的浏览器 User-Agent</td>
+                        </tr>
+                        <tr>
+                            <td><code>GROK_BASE_URL</code></td>
+                            <td>string</td>
+                            <td data-i18n="tutorial.grok.baseUrl">Grok 服务地址，默认 https://grok.com</td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
     </div>
