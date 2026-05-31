@@ -82,5 +82,8 @@
     "KIRO_MODEL_CAPABILITIES": {
         "claude-opus-4.7": { "contextCompression": false },
         "claude-opus-4.8": { "contextCompression": false }
-    }
+    },
+
+    "_tokenBufferReserve_NOTES_": "Kiro 历史裁剪的 token 缓冲预留。裁剪上限 = 模型上下文 - tokenBufferReserve，给 currentMessage + tools + 输出留空间。省略时默认 50000，取值会被 clamp 到 [5000, 150000]。仅作用于 claude-kiro-oauth provider。",
+    "tokenBufferReserve": 50000
 }
