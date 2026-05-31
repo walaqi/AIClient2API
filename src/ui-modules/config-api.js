@@ -373,7 +373,8 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
                 OUTPUT_RESERVE_CONTEXT_PRESSURE: currentConfig.OUTPUT_RESERVE_CONTEXT_PRESSURE,
                 OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE: currentConfig.OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE,
                 OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS: currentConfig.OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS,
-                OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE: currentConfig.OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE
+                OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE: currentConfig.OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE,
+                KIRO_MODEL_CAPABILITIES: currentConfig.KIRO_MODEL_CAPABILITIES
             };
 
             await atomicWriteFile(configPath, JSON.stringify(configToSave, null, 2), { encoding: 'utf-8', mode: 0o600 });
