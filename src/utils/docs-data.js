@@ -30,6 +30,7 @@ export const HELP_DATA = {
         { flag: "--cron-refresh-token", default: "false", desc: "是否开启令牌自动刷新任务" },
         { flag: "--provider-pools-file", default: "configs/provider_pools.json", desc: "提供商号池配置文件路径" },
         { flag: "--custom-models-file", default: "configs/custom_models.json", desc: "自定义模型映射文件路径" },
+        { flag: "--detected-models-file", default: "configs/detected_models.json", desc: "检测可用模型缓存文件路径" },
         { flag: "--max-error-count", default: "10", desc: "单个账号最大连续错误重置次数" },
         { flag: "--rate-limit-cooldown-enabled", default: "false", desc: "是否启用 429 频率限制冷却" },
         { flag: "--rate-limit-cooldown-ms", default: "30000", desc: "基础冷却时长 (ms)" },

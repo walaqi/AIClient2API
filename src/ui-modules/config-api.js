@@ -343,6 +343,7 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
                 LOGIN_MIN_INTERVAL: currentConfig.LOGIN_MIN_INTERVAL,
                 PROVIDER_POOLS_FILE_PATH: currentConfig.PROVIDER_POOLS_FILE_PATH,
                 CUSTOM_MODELS_FILE_PATH: currentConfig.CUSTOM_MODELS_FILE_PATH,
+                DETECTED_MODELS_FILE_PATH: currentConfig.DETECTED_MODELS_FILE_PATH,
                 MAX_ERROR_COUNT: currentConfig.MAX_ERROR_COUNT,
                 WARMUP_TARGET: currentConfig.WARMUP_TARGET,
                 REFRESH_CONCURRENCY_PER_PROVIDER: currentConfig.REFRESH_CONCURRENCY_PER_PROVIDER,
