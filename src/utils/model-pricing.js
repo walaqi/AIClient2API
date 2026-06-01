@@ -7,18 +7,29 @@ import logger from './logger.js';
 import { parseProxyUrl } from './proxy-utils.js';
 import { CONFIG } from '../core/config-manager.js';
 
-const PRICE_SOURCE_RAW = 'https://raw.githubusercontent.com/Wei-Shaw/model-price-repo/main/model_prices_and_context_window.json';
+const PRICE_SOURCE_RAW = 'https://raw.githubusercontent.com/walaqi/model-price-repo/refs/heads/main/model_prices_and_context_window.json';
+// 价格表映射: 本系统原生 model id(request._clientModelId) -> 价格文件中的标准 model id。
+// 背景: 本系统作为上游系统 s 的后端, s 只认标准 claude 模型, 映射在 s 侧完成,
+// 发到本系统的已是非标准的原生 id, 这些 id 在价格文件里查不到, 需再映射一次才能查价。
+// 映射不放在本系统做标准模型映射, 是为了避免污染可用模型列表破坏 s 的请求链路。
+const PRICE_MAPPING_RAW_CLAUDE_KIRO_OAUTH = 'https://raw.githubusercontent.com/walaqi/model-price-repo/refs/heads/main/claude-kiro-oauth-model-mapping.json';
 const CACHE_FILE = path.join(process.cwd(), 'configs', 'model-prices.json');
+const MAPPING_CACHE_FILE = path.join(process.cwd(), 'configs', 'claude-kiro-oauth-model-mapping.json');
 const REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-function buildPriceCandidates() {
+// 通过 gh-proxy 镜像 + 直连构造候选源, 与价格表同款回退策略。
+function buildCandidates(rawUrl) {
     return [
-        { name: 'gh-proxy.org', url: `https://gh-proxy.org/${PRICE_SOURCE_RAW}` },
-        { name: 'hk.gh-proxy.org', url: `https://hk.gh-proxy.org/${PRICE_SOURCE_RAW}` },
-        { name: 'cdn.gh-proxy.org', url: `https://cdn.gh-proxy.org/${PRICE_SOURCE_RAW}` },
-        { name: 'edgeone.gh-proxy.org', url: `https://edgeone.gh-proxy.org/${PRICE_SOURCE_RAW}` },
-        { name: 'direct', url: PRICE_SOURCE_RAW }
+        { name: 'gh-proxy.org', url: `https://gh-proxy.org/${rawUrl}` },
+        { name: 'hk.gh-proxy.org', url: `https://hk.gh-proxy.org/${rawUrl}` },
+        { name: 'cdn.gh-proxy.org', url: `https://cdn.gh-proxy.org/${rawUrl}` },
+        { name: 'edgeone.gh-proxy.org', url: `https://edgeone.gh-proxy.org/${rawUrl}` },
+        { name: 'direct', url: rawUrl }
     ];
+}
+
+function buildPriceCandidates() {
+    return buildCandidates(PRICE_SOURCE_RAW);
 }
 /**
  * 假设值. $0.2==1credit. 
@@ -31,6 +42,25 @@ const CREDIT_TO_USD = 0.2;
 let priceData = null;
 let sortedKeys = null;
 let lastFetchTime = 0;
+
+// 价格映射: { 原生 id -> 价格文件标准 id }。源文件是 { mapping: [ {原生id: 标准id}, ... ] }。
+// 同一原生 id 出现多次时后写覆盖(last-wins): 配置里把语义正确的标准 id 放在该 key 的最后一条。
+let priceModelMapping = {};
+
+// 将映射源文件的 { mapping: [...] } 数组结构归一化为 { 原生id: 标准id } 查找表。
+function normalizeMapping(raw) {
+    const result = {};
+    const list = raw && Array.isArray(raw.mapping) ? raw.mapping : [];
+    for (const entry of list) {
+        if (!entry || typeof entry !== 'object') continue;
+        for (const [nativeId, mappedId] of Object.entries(entry)) {
+            if (typeof nativeId === 'string' && typeof mappedId === 'string') {
+                result[nativeId] = mappedId; // 后写覆盖
+            }
+        }
+    }
+    return result;
+}
 
 export async function fetchAndCacheModelPrices() {
     const candidates = buildPriceCandidates();
@@ -66,7 +96,56 @@ export async function fetchAndCacheModelPrices() {
     return false;
 }
 
+export async function fetchAndCacheModelMapping() {
+    const candidates = buildCandidates(PRICE_MAPPING_RAW_CLAUDE_KIRO_OAUTH);
+    let proxyConfig = null;
+
+    if (CONFIG && CONFIG.PROXY_URL) {
+        proxyConfig = parseProxyUrl(CONFIG.PROXY_URL);
+    }
+
+    for (const candidate of candidates) {
+        try {
+            logger.info(`[Model Pricing] Fetching mapping from ${candidate.name}...`);
+            const axiosConfig = { timeout: 15000 };
+            if (proxyConfig) {
+                axiosConfig.httpAgent = proxyConfig.httpAgent;
+                axiosConfig.httpsAgent = proxyConfig.httpsAgent;
+                axiosConfig.proxy = false;
+            }
+            const response = await axios.get(candidate.url, axiosConfig);
+            if (response.data && typeof response.data === 'object') {
+                const normalized = normalizeMapping(response.data);
+                if (Object.keys(normalized).length > 0) {
+                    priceModelMapping = normalized;
+                    await atomicWriteFile(MAPPING_CACHE_FILE, JSON.stringify(response.data, null, 2), 'utf-8');
+                    logger.info(`[Model Pricing] Loaded ${Object.keys(priceModelMapping).length} model mappings from ${candidate.name}, cached to ${MAPPING_CACHE_FILE}`);
+                    return true;
+                }
+                logger.warn(`[Model Pricing] Mapping from ${candidate.name} has no valid entries, skipping`);
+            }
+        } catch (error) {
+            logger.warn(`[Model Pricing] Failed to fetch mapping from ${candidate.name}: ${error.message}`);
+        }
+    }
+    return false;
+}
+
 export async function loadModelPrices() {
+    // 先尝试本地映射缓存(随程序分发的种子文件), 失败再走远程
+    if (existsSync(MAPPING_CACHE_FILE)) {
+        try {
+            const mapContent = await fs.readFile(MAPPING_CACHE_FILE, 'utf8');
+            const normalized = normalizeMapping(JSON.parse(mapContent));
+            if (Object.keys(normalized).length > 0) {
+                priceModelMapping = normalized;
+                logger.info(`[Model Pricing] Loaded ${Object.keys(priceModelMapping).length} model mappings from local cache`);
+            }
+        } catch (error) {
+            logger.warn('[Model Pricing] Failed to read local mapping cache:', error.message);
+        }
+    }
+
     // Try local cache first
     if (existsSync(CACHE_FILE)) {
         try {
@@ -86,24 +165,30 @@ export async function loadModelPrices() {
             logger.warn('[Model Pricing] No pricing data available (remote fetch failed and no local cache)');
         }
     });
+    // 映射文件远程刷新同样不阻塞启动
+    fetchAndCacheModelMapping().catch(() => {});
 }
 
 export async function refreshIfNeeded() {
     if (Date.now() - lastFetchTime > REFRESH_INTERVAL_MS) {
         await fetchAndCacheModelPrices();
+        await fetchAndCacheModelMapping();
     }
 }
 
 export function getModelPricing(modelId) {
     if (!priceData) return null;
 
-    // Exact match
-    if (priceData[modelId]) return priceData[modelId];
+    // 先按映射表把本系统原生 id 转成价格文件的标准 id; 无映射则维持原 id。
+    const lookupId = priceModelMapping[modelId] || modelId;
 
-    // Forward match: modelId starts with a key from priceData
+    // Exact match
+    if (priceData[lookupId]) return priceData[lookupId];
+
+    // Forward match: lookupId starts with a key from priceData
     // Sort keys by length descending to prefer longer (more specific) matches
     if (sortedKeys) {
-        const match = sortedKeys.find(key => modelId.startsWith(key));
+        const match = sortedKeys.find(key => lookupId.startsWith(key));
         if (match) return priceData[match];
     }
 

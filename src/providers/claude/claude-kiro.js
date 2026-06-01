@@ -2015,7 +2015,8 @@ async saveCredentialsToFile(filePath, newData) {
                 'Bash',
                 'Write',
                 'Edit',
-                'Agent'
+                'Agent',
+                'Workflow'
             ]);
 
             let truncatedCount = 0;
