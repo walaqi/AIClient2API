@@ -815,7 +815,11 @@ const KIRO_REFRESH_CONSTANTS = {
     DEFAULT_PROVIDER: 'Google',
     REQUEST_TIMEOUT: 30000,
     DEFAULT_REGION: 'us-east-1',
-    IDC_REGION: 'us-east-1'  // 用于 REFRESH_IDC_URL 的区域配置
+    IDC_REGION: 'us-east-1',  // 用于 REFRESH_IDC_URL 的区域配置
+    // 官方固定 profileArn（按登录方式区分）：导入凭据缺 profileArn 时据此推导，
+    // 无需调用 CodeWhisperer ListAvailableProfiles（该接口在部分环境不可达）。
+    SOCIAL_PROFILE_ARN: 'arn:aws:codewhisperer:us-east-1:699475941385:profile/EHGA3GRVQMUK',
+    BUILDER_ID_PROFILE_ARN: 'arn:aws:codewhisperer:us-east-1:638616132270:profile/AAAACCCCXXXX'
 };
 
 /**
@@ -1287,17 +1291,33 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
             };
         }
 
-        // profileArn 兜底：导入的凭据文件常缺少 profileArn，运行时调用 CodeWhisperer 会因此失败。
-        // 刷新响应未直接给出、用户也没填时，用 accessToken 调 ListAvailableProfiles 解析一次。
+        // profileArn 解析（导入凭据常缺该字段，运行时调用 CodeWhisperer 会失败）。
+        // 优先级：① 文件自带 / 刷新响应返回（上面已赋值）
+        //         ② 调 CodeWhisperer ListAvailableProfiles 接口解析真实 arn
+        //         ③ 按登录方式推导官方固定 profileArn 兜底（保证一定有值）
         if (!credentialsData.profileArn && credentialsData.accessToken) {
             const refreshRegion = credentials.idcRegion || KIRO_REFRESH_CONSTANTS.IDC_REGION;
-            const resolvedArn = await fetchBuilderIDProfileArn(credentialsData.accessToken, refreshRegion);
-            if (resolvedArn) {
-                credentialsData.profileArn = resolvedArn;
-                logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} profileArn resolved via ListAvailableProfiles: ${resolvedArn}`);
-            } else {
-                logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} profileArn unresolved; saved credentials may fail at runtime until it is populated.`);
+            try {
+                const resolvedArn = await fetchBuilderIDProfileArn(credentialsData.accessToken, refreshRegion);
+                if (resolvedArn) {
+                    credentialsData.profileArn = resolvedArn;
+                    logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} profileArn resolved via ListAvailableProfiles: ${resolvedArn}`);
+                }
+            } catch (arnError) {
+                logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} ListAvailableProfiles error: ${arnError.message}`);
             }
+        }
+        if (!credentialsData.profileArn) {
+            // 接口解析失败（部分环境不可达）→ 按登录方式推导官方固定 profileArn（与参考实现一致）
+            const authMethodLower = String(credentialsData.authMethod || '').toLowerCase();
+            const providerLower = String(credentials.provider || '').toLowerCase();
+            const isSocial = authMethodLower === KIRO_REFRESH_CONSTANTS.AUTH_METHOD_SOCIAL
+                || providerLower === 'google'
+                || providerLower === 'github';
+            credentialsData.profileArn = isSocial
+                ? KIRO_REFRESH_CONSTANTS.SOCIAL_PROFILE_ARN
+                : KIRO_REFRESH_CONSTANTS.BUILDER_ID_PROFILE_ARN;
+            logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} profileArn derived from auth method (${isSocial ? 'social' : 'builder-id'}): ${credentialsData.profileArn}`);
         }
         
         // 生成文件路径: configs/kiro/{timestamp}_kiro-auth-token/{timestamp}_kiro-auth-token.json
