@@ -1226,6 +1226,9 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
         if (credentials.expiresAt) {
             credentialsData.expiresAt = credentials.expiresAt;
         }
+        if (credentials.profileArn) {
+            credentialsData.profileArn = credentials.profileArn;
+        }
         if (credentials.startUrl) {
             credentialsData.startUrl = credentials.startUrl;
         }
@@ -1262,6 +1265,12 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
                 credentialsData.expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
                 refreshSucceeded = true;
                 logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} Token refreshed successfully`);
+
+                // 优先用刷新响应直接返回的 profileArn（与设备码授权流程一致）
+                if (typeof tokenData.profileArn === 'string' && tokenData.profileArn.trim()) {
+                    credentialsData.profileArn = tokenData.profileArn.trim();
+                    logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} profileArn from refresh response: ${credentialsData.profileArn}`);
+                }
             } else {
                 logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} Token refresh failed, saving original credentials`);
             }
@@ -1276,6 +1285,19 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
                 success: false,
                 error: 'accessToken is empty and token refresh failed. Please provide a valid accessToken or check clientId/clientSecret/refreshToken/idcRegion.'
             };
+        }
+
+        // profileArn 兜底：导入的凭据文件常缺少 profileArn，运行时调用 CodeWhisperer 会因此失败。
+        // 刷新响应未直接给出、用户也没填时，用 accessToken 调 ListAvailableProfiles 解析一次。
+        if (!credentialsData.profileArn && credentialsData.accessToken) {
+            const refreshRegion = credentials.idcRegion || KIRO_REFRESH_CONSTANTS.IDC_REGION;
+            const resolvedArn = await fetchBuilderIDProfileArn(credentialsData.accessToken, refreshRegion);
+            if (resolvedArn) {
+                credentialsData.profileArn = resolvedArn;
+                logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} profileArn resolved via ListAvailableProfiles: ${resolvedArn}`);
+            } else {
+                logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} profileArn unresolved; saved credentials may fail at runtime until it is populated.`);
+            }
         }
         
         // 生成文件路径: configs/kiro/{timestamp}_kiro-auth-token/{timestamp}_kiro-auth-token.json
