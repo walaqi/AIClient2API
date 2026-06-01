@@ -1184,11 +1184,10 @@ export async function batchImportKiroRefreshTokensStream(refreshTokens, region =
  */
 export async function importAwsCredentials(credentials, skipDuplicateCheck = false) {
     try {
-        // 验证必需字段 - 需要四个字段都存在
+        // 验证必需字段 - accessToken 选填，留空时下面会用 refreshToken 自动刷新获取
         const missingFields = [];
         if (!credentials.clientId) missingFields.push('clientId');
         if (!credentials.clientSecret) missingFields.push('clientSecret');
-        if (!credentials.accessToken) missingFields.push('accessToken');
         if (!credentials.refreshToken) missingFields.push('refreshToken');
         
         if (missingFields.length > 0) {
@@ -1212,11 +1211,11 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
         
         logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} Importing AWS credentials...`);
         
-        // 准备凭据数据 - 四个字段都是必需的
+        // 准备凭据数据 - accessToken 选填，留空时下面刷新成功后回填
         const credentialsData = {
             clientId: credentials.clientId,
             clientSecret: credentials.clientSecret,
-            accessToken: credentials.accessToken,
+            accessToken: credentials.accessToken || '',
             refreshToken: credentials.refreshToken,
             authMethod: credentials.authMethod || 'builder-id',
             // region: credentials.region || KIRO_REFRESH_CONSTANTS.DEFAULT_REGION,
@@ -1235,12 +1234,13 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
         }
         
         // 尝试刷新获取最新的 accessToken
+        let refreshSucceeded = false;
         try {
             logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} Attempting to refresh token with provided credentials...`);
-            
+
             const refreshRegion = credentials.idcRegion || KIRO_REFRESH_CONSTANTS.IDC_REGION;
             const refreshUrl = KIRO_REFRESH_CONSTANTS.REFRESH_IDC_URL.replace('{{region}}', refreshRegion);
-            
+
             const refreshResponse = await fetchWithProxy(refreshUrl, {
                 method: 'POST',
                 headers: {
@@ -1253,13 +1253,14 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
                     grantType: 'refresh_token'
                 })
             }, 'claude-kiro-oauth');
-            
+
             if (refreshResponse.ok) {
                 const tokenData = await refreshResponse.json();
                 credentialsData.accessToken = tokenData.accessToken;
                 credentialsData.refreshToken = tokenData.refreshToken;
                 const expiresIn = tokenData.expiresIn || 3600;
                 credentialsData.expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+                refreshSucceeded = true;
                 logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} Token refreshed successfully`);
             } else {
                 logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} Token refresh failed, saving original credentials`);
@@ -1267,6 +1268,14 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
         } catch (refreshError) {
             logger.warn(`${KIRO_OAUTH_CONFIG.logPrefix} Token refresh error:`, refreshError.message);
             // 继续保存原始凭据
+        }
+
+        // 未提供 accessToken 且刷新失败时无法生成可用凭据，直接报错
+        if (!refreshSucceeded && !credentialsData.accessToken) {
+            return {
+                success: false,
+                error: 'accessToken is empty and token refresh failed. Please provide a valid accessToken or check clientId/clientSecret/refreshToken/idcRegion.'
+            };
         }
         
         // 生成文件路径: configs/kiro/{timestamp}_kiro-auth-token/{timestamp}_kiro-auth-token.json

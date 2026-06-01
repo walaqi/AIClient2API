@@ -2472,7 +2472,7 @@ function showKiroAwsImportModal() {
                             </div>
                             <div style="color: #fbbf24; font-size: 11px; margin-top: 12px; padding: 8px; background: rgba(251, 191, 36, 0.1); border-radius: 4px;">
                                 <i class="fas fa-info-circle"></i>
-                                <strong>注意：</strong>AWS企业用户需要额外添加 <code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 2px;">idcRegion</code> 字段
+                                <strong>注意：</strong>必填字段为 <code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 2px;">clientId</code>、<code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 2px;">clientSecret</code>、<code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 2px;">refreshToken</code>；<code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 2px;">accessToken</code> 可留空，导入时会用 refreshToken 自动获取。AWS企业用户需额外填写 <code style="background: rgba(0,0,0,0.3); padding: 2px 4px; border-radius: 2px;">idcRegion</code> 字段（如 us-west-2，默认 us-east-1）。
                             </div>
                         </div>
                     </details>
@@ -2499,7 +2499,7 @@ function showKiroAwsImportModal() {
     `;
     
     document.body.appendChild(modal);
-    
+
     const fileInput = modal.querySelector('#awsFilesInput');
     const uploadArea = modal.querySelector('.aws-file-upload-area');
     const filesListDiv = modal.querySelector('#awsFilesList');
@@ -2532,7 +2532,7 @@ function showKiroAwsImportModal() {
         // 清空 file input
         fileInput.value = '';
     });
-    
+
     // 清空按钮 hover 效果
     clearFilesBtn.addEventListener('mouseenter', () => {
         clearFilesBtn.style.background = '#fef2f2';
@@ -2633,20 +2633,20 @@ function showKiroAwsImportModal() {
         e.preventDefault();
         uploadArea.style.borderColor = '#d1d5db';
         uploadArea.style.background = 'transparent';
-        
+
         const files = Array.from(e.dataTransfer.files).filter(f => f.name.endsWith('.json'));
         if (files.length > 0) {
             processFiles(files);
         }
     });
-    
+
     fileInput.addEventListener('change', () => {
         const files = Array.from(fileInput.files);
         if (files.length > 0) {
             processFiles(files);
         }
     });
-    
+
     // 处理上传的文件（支持追加）
     async function processFiles(files) {
         for (const file of files) {
@@ -2681,10 +2681,10 @@ function showKiroAwsImportModal() {
         renderFilesList();
         
         filesListDiv.style.display = uploadedFiles.length > 0 ? 'block' : 'none';
-        
+
         // 清空 file input 以便可以再次选择相同文件
         fileInput.value = '';
-        
+
         validateAndPreview();
     }
     
@@ -2697,8 +2697,15 @@ function showKiroAwsImportModal() {
             fileDiv.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 8px; background: white; border-radius: 4px; margin-bottom: 4px;';
             fileDiv.dataset.filename = file.name;
             
-            const fields = Object.keys(file.content).slice(0, 5).join(', ');
-            const moreFields = Object.keys(file.content).length > 5 ? '...' : '';
+            // 数组文件显示凭据条数，对象文件显示字段名预览
+            let fields, moreFields;
+            if (Array.isArray(file.content)) {
+                fields = `${file.content.length} 个凭据`;
+                moreFields = '';
+            } else {
+                fields = Object.keys(file.content).slice(0, 5).join(', ');
+                moreFields = Object.keys(file.content).length > 5 ? '...' : '';
+            }
             
             fileDiv.innerHTML = `
                 <div style="flex: 1; min-width: 0;">
@@ -2738,23 +2745,46 @@ function showKiroAwsImportModal() {
         }
         
         // 智能合并所有文件的内容
-        // 如果多个文件都有 expiresAt，使用包含 refreshToken 的文件中的 expiresAt
-        mergedCredentials = {};
-        let expiresAtFromRefreshTokenFile = null;
-        
+        // - 数组文件（合并后的多凭据 JSON）按元素逐个展开为批量导入项
+        // - 对象文件支持跨文件字段补全，合并为单个凭据
+        // - 同时存在两者时，合并出的单对象作为批量中的一项
+        const arrayCredentials = [];
+        const objectFiles = [];
         for (const file of uploadedFiles) {
-            // 如果这个文件包含 refreshToken，记录它的 expiresAt
-            if (file.content.refreshToken && file.content.expiresAt) {
-                expiresAtFromRefreshTokenFile = file.content.expiresAt;
+            if (Array.isArray(file.content)) {
+                arrayCredentials.push(...file.content);
+            } else if (file.content && typeof file.content === 'object') {
+                objectFiles.push(file);
             }
-            Object.assign(mergedCredentials, file.content);
         }
-        
-        // 如果找到了包含 refreshToken 的文件的 expiresAt，使用它
-        if (expiresAtFromRefreshTokenFile) {
-            mergedCredentials.expiresAt = expiresAtFromRefreshTokenFile;
+
+        // 对象文件智能合并：如果多个文件都有 expiresAt，使用包含 refreshToken 的文件中的 expiresAt
+        let mergedObject = null;
+        if (objectFiles.length > 0) {
+            mergedObject = {};
+            let expiresAtFromRefreshTokenFile = null;
+            for (const file of objectFiles) {
+                if (file.content.refreshToken && file.content.expiresAt) {
+                    expiresAtFromRefreshTokenFile = file.content.expiresAt;
+                }
+                Object.assign(mergedObject, file.content);
+            }
+            if (expiresAtFromRefreshTokenFile) {
+                mergedObject.expiresAt = expiresAtFromRefreshTokenFile;
+            }
         }
-        
+
+        if (arrayCredentials.length > 0) {
+            // 存在数组文件 → 整体作为批量导入
+            mergedCredentials = [...arrayCredentials];
+            if (mergedObject) {
+                mergedCredentials.push(mergedObject);
+            }
+        } else {
+            // 仅对象文件 → 保持单凭据（原有行为）
+            mergedCredentials = mergedObject;
+        }
+
         validateAndShowResult();
     }
     
@@ -2778,18 +2808,19 @@ function showKiroAwsImportModal() {
                 const hasClientSecret = !!cred.clientSecret;
                 const hasAccessToken = !!cred.accessToken;
                 const hasRefreshToken = !!cred.refreshToken;
-                const isValid = hasClientId && hasClientSecret && hasAccessToken && hasRefreshToken;
-                
+                // accessToken 选填：留空时导入阶段用 refreshToken 自动刷新获取
+                const isValid = hasClientId && hasClientSecret && hasRefreshToken;
+
                 if (!isValid) allValid = false;
-                
+
                 return {
                     index: index + 1,
                     isValid,
                     fields: [
-                        { key: 'clientId', has: hasClientId },
-                        { key: 'clientSecret', has: hasClientSecret },
-                        { key: 'accessToken', has: hasAccessToken },
-                        { key: 'refreshToken', has: hasRefreshToken }
+                        { key: 'clientId', has: hasClientId, optional: false },
+                        { key: 'clientSecret', has: hasClientSecret, optional: false },
+                        { key: 'refreshToken', has: hasRefreshToken, optional: false },
+                        { key: 'accessToken', has: hasAccessToken, optional: true }
                     ]
                 };
             });
@@ -2799,9 +2830,11 @@ function showKiroAwsImportModal() {
                 const statusIcon = cv.isValid ? '✓' : '✗';
                 const statusColor = cv.isValid ? '#166534' : '#991b1b';
                 const fieldsHtml = cv.fields.map(f => `
-                    <span style="margin-right: 8px;">${f.key}: ${f.has
+                    <span style="margin-right: 8px;">${f.key}${f.optional ? ` (${t('common.optional')})` : ''}: ${f.has
                         ? `<code style="background: #dcfce7; padding: 1px 4px; border-radius: 2px; color: #166534;">✓</code>`
-                        : `<code style="background: #fecaca; padding: 1px 4px; border-radius: 2px; color: #991b1b;">✗</code>`
+                        : (f.optional
+                            ? `<code style="background: #e5e7eb; padding: 1px 4px; border-radius: 2px; color: #6b7280;">—</code>`
+                            : `<code style="background: #fecaca; padding: 1px 4px; border-radius: 2px; color: #991b1b;">✗</code>`)
                     }</span>
                 `).join('');
                 
@@ -2844,7 +2877,7 @@ function showKiroAwsImportModal() {
                     </div>
                     <p style="margin: 12px 0 0 0; font-size: 12px; padding: 8px; background: #fee2e2; border-radius: 4px;">
                         <i class="fas fa-lightbulb" style="color: #dc2626;"></i>
-                        请确保每个凭据都包含所有必需字段：clientId, clientSecret, accessToken, refreshToken
+                        请确保每个凭据都包含所有必需字段：clientId, clientSecret, refreshToken（accessToken 可留空，导入时自动获取）
                     </p>
                 `;
                 submitBtn.disabled = true;
@@ -2873,22 +2906,24 @@ function showKiroAwsImportModal() {
             const hasClientSecret = !!mergedCredentials.clientSecret;
             const hasAccessToken = !!mergedCredentials.accessToken;
             const hasRefreshToken = !!mergedCredentials.refreshToken;
-            
-            // 所有四个字段都必须存在
-            const isValid = hasClientId && hasClientSecret && hasAccessToken && hasRefreshToken;
-            
+
+            // accessToken 选填：留空时导入阶段用 refreshToken 自动刷新获取
+            const isValid = hasClientId && hasClientSecret && hasRefreshToken;
+
             // 构建字段状态列表
             const fieldsList = [
-                { key: 'clientId', has: hasClientId },
-                { key: 'clientSecret', has: hasClientSecret },
-                { key: 'accessToken', has: hasAccessToken },
-                { key: 'refreshToken', has: hasRefreshToken }
+                { key: 'clientId', has: hasClientId, optional: false },
+                { key: 'clientSecret', has: hasClientSecret, optional: false },
+                { key: 'refreshToken', has: hasRefreshToken, optional: false },
+                { key: 'accessToken', has: hasAccessToken, optional: true }
             ];
-            
+
             const fieldsHtml = fieldsList.map(f => `
-                <li>${f.key}: ${f.has
+                <li>${f.key}${f.optional ? ` (${t('common.optional')})` : ''}: ${f.has
                     ? `<code style="background: #dcfce7; padding: 1px 4px; border-radius: 2px; color: #166534;">✓ ${t('common.found')}</code>`
-                    : `<code style="background: #fecaca; padding: 1px 4px; border-radius: 2px; color: #991b1b;">✗ ${t('common.missing')}</code>`
+                    : (f.optional
+                        ? `<code style="background: #e5e7eb; padding: 1px 4px; border-radius: 2px; color: #6b7280;">— ${t('common.optional')}</code>`
+                        : `<code style="background: #fecaca; padding: 1px 4px; border-radius: 2px; color: #991b1b;">✗ ${t('common.missing')}</code>`)
                 }</li>
             `).join('');
             
@@ -3180,8 +3215,14 @@ function showKiroAwsImportModal() {
                     jsonInputTextarea.disabled = false;
                 }
             } else {
-                // 导入成功后，保持提交按钮禁用状态，并显示成功图标
-                submitBtn.innerHTML = `<i class="fas fa-check-circle"></i> <span>${t('common.success')}</span>`;
+                // 导入成功后，把提交按钮变成可点击的「关闭」按钮，点击关闭弹窗
+                // （批量模式不自动关闭弹窗以展示每条结果，但按钮必须可点，否则像死按钮）
+                // 用 cloneNode 替换自身以清除原有的提交 click 监听，避免点击时重复触发导入
+                const closeBtnEl = submitBtn.cloneNode(false);
+                closeBtnEl.disabled = false;
+                closeBtnEl.innerHTML = `<i class="fas fa-check-circle"></i> <span>${t('common.close')}</span>`;
+                closeBtnEl.addEventListener('click', () => modal.remove());
+                submitBtn.replaceWith(closeBtnEl);
             }
         }
     });

@@ -536,10 +536,10 @@ export async function handleImportAwsCredentials(req, res) {
             const validationErrors = [];
             for (let i = 0; i < credentials.length; i++) {
                 const cred = credentials[i];
+                // accessToken 为选填：留空时导入阶段会用 refreshToken 自动刷新获取
                 const missingFields = [];
                 if (!cred.clientId) missingFields.push('clientId');
                 if (!cred.clientSecret) missingFields.push('clientSecret');
-                if (!cred.accessToken) missingFields.push('accessToken');
                 if (!cred.refreshToken) missingFields.push('refreshToken');
                 
                 if (missingFields.length > 0) {
@@ -647,11 +647,10 @@ export async function handleImportAwsCredentials(req, res) {
             
         } else if (typeof credentials === 'object') {
             // 单个导入模式
-            // 验证必需字段 - 需要四个字段都存在
+            // 验证必需字段 - accessToken 选填，留空时导入阶段用 refreshToken 自动刷新获取
             const missingFields = [];
             if (!credentials.clientId) missingFields.push('clientId');
             if (!credentials.clientSecret) missingFields.push('clientSecret');
-            if (!credentials.accessToken) missingFields.push('accessToken');
             if (!credentials.refreshToken) missingFields.push('refreshToken');
             
             if (missingFields.length > 0) {
