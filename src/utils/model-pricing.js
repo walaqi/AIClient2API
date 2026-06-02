@@ -37,7 +37,7 @@ function buildPriceCandidates() {
  * 反算的cache_creation_input_tokens全部等于0, 
  * cache_read_input_tokens全部等于input_tokens
  */
-const CREDIT_TO_USD = 0.1; 
+const CREDIT_TO_USD = 0.08; 
 
 let priceData = null;
 let sortedKeys = null;
@@ -197,6 +197,16 @@ export function getModelPricing(modelId) {
 
 export function isModelPricingAvailable() {
     return priceData !== null;
+}
+
+// 价格表里的 max_input_tokens 即模型的上下文窗口大小, 直接复用, 避免在各 provider 里硬编码维护。
+// getModelPricing 已处理原生 id -> 标准 id 映射与前缀匹配; 查不到或字段非法时返回 null 交由调用方回退。
+export function getModelContextWindow(modelId) {
+    if (typeof modelId !== 'string' || !modelId) return null;
+
+    const pricing = getModelPricing(modelId);
+    const maxInputTokens = Number(pricing?.max_input_tokens);
+    return Number.isFinite(maxInputTokens) && maxInputTokens > 0 ? maxInputTokens : null;
 }
 
 export function getCreditToUsd() {

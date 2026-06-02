@@ -19,7 +19,7 @@ import {
 import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider, parseProxyUrl } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
-import { calculateCacheTokens } from '../../utils/model-pricing.js';
+import { calculateCacheTokens, getModelContextWindow } from '../../utils/model-pricing.js';
 import { parseAwsEventStreamFrames as awsParseEventStreamFrames } from './aws-event-stream-parser.js';
 import { isIncompleteFileToolCall } from './kiro-tool-validators.js';
 
@@ -835,19 +835,6 @@ function normalizeKiroToolInput(input) {
     return String(input);
 }
 
-// Per-model context window sizes for accurate token estimation
-const MODEL_CONTEXT_TOKENS = {
-    "claude-opus-4-7": 1000000,
-    "claude-opus-4-6": 1000000,
-    "claude-opus-4-5": 1000000,
-    "claude-opus-4-5-20251101": 1000000,
-    "claude-sonnet-4-6": 200000,
-    "claude-sonnet-4-5": 200000,
-    "claude-sonnet-4-5-20250929": 200000,
-    "claude-haiku-4-5": 200000,
-    "claude-haiku-4-5-20251001": 200000,
-};
-
 function normalizeContextLength(value) {
     if (value === undefined || value === null || value === '') {
         return null;
@@ -871,6 +858,8 @@ function findCustomModelConfigForModel(model, config = {}) {
     ) || null;
 }
 
+// 上下文窗口大小来源优先级: 自定义模型显式配置 -> 价格表 max_input_tokens(随价格文件 24h 刷新) -> 兜底常量。
+// 不再硬编码 per-model 窗口表: 价格表的 max_input_tokens 即各模型真实上下文窗口, 且经 model 映射表覆盖原生 id。
 function getContextTokensForModel(model, config = {}, fallbackModel = null) {
     const customModelConfig = findCustomModelConfigForModel(model, config) ||
         findCustomModelConfigForModel(fallbackModel, config);
@@ -879,7 +868,9 @@ function getContextTokensForModel(model, config = {}, fallbackModel = null) {
         return configuredModelContextLength;
     }
 
-    return MODEL_CONTEXT_TOKENS[model] || MODEL_CONTEXT_TOKENS[fallbackModel] || KIRO_CONSTANTS.TOTAL_CONTEXT_TOKENS;
+    return getModelContextWindow(model) ||
+        getModelContextWindow(fallbackModel) ||
+        KIRO_CONSTANTS.TOTAL_CONTEXT_TOKENS;
 }
 // 从 provider-models.js 获取支持的模型列表
 const KIRO_MODELS = getProviderModels(MODEL_PROVIDER.KIRO_API);
