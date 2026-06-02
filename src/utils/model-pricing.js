@@ -32,12 +32,12 @@ function buildPriceCandidates() {
     return buildCandidates(PRICE_SOURCE_RAW);
 }
 /**
- * 假设值. $0.2==1credit. 
+ * 假设值. $0.1==1credit. 
  * 低于这个值,会导致kiro计费太低, 
  * 反算的cache_creation_input_tokens全部等于0, 
  * cache_read_input_tokens全部等于input_tokens
  */
-const CREDIT_TO_USD = 0.2; 
+const CREDIT_TO_USD = 0.1; 
 
 let priceData = null;
 let sortedKeys = null;
