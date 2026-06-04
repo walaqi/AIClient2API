@@ -37,7 +37,7 @@ function buildPriceCandidates() {
  * 反算的cache_creation_input_tokens全部等于0, 
  * cache_read_input_tokens全部等于input_tokens
  */
-const CREDIT_TO_USD = 0.08; 
+const CREDIT_TO_USD = 0.15; 
 
 let priceData = null;
 let sortedKeys = null;

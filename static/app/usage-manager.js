@@ -366,7 +366,9 @@ function createInstanceUsageCard(instance, providerType) {
     const usage = instance.usage || {};
     const summary = usage.summary || { usedPercent: 0, status: 'normal' };
     const user = usage.user || {};
-    const displayName = user.email || instance.name || instance.uuid;
+    // 与「提供商池管理」保持一致：优先使用池中的显示名称（customName || uuid），
+    // 而不是凭据文件中的账号名（如邮箱）。账号邮箱仍在下方 user-info 行展示。
+    const displayName = instance.name || instance.uuid;
 
     // 使用后端返回的 planClass，如果缺失则兜底
     const planClass = summary.planClass || 'plan-default';

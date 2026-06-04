@@ -5,7 +5,6 @@ import { usageService } from '../services/usage-service.js';
 import { readUsageCache, writeUsageCache, readProviderUsageCache, updateProviderUsageCache } from './usage-cache.js';
 import { PROVIDER_MAPPINGS } from '../utils/provider-utils.js';
 import { MODEL_PROVIDER } from '../utils/common.js';
-import path from 'path';
 import { existsSync, readFileSync } from 'fs';
 
 const supportedProviders = [
@@ -174,24 +173,14 @@ async function getProviderTypeUsage(providerType, currentConfig, providerPoolMan
  * @returns {string} 显示名称
  */
 function getProviderDisplayName(provider, providerType) {
+    // 与「提供商池管理」保持一致的命名规则：有自定义名称显示自定义名称，否则显示 UUID。
+    // 不再回退到凭据文件名，避免与提供商池管理显示不一致。
     // 1. 优先使用自定义名称
     if (provider.customName) {
         return provider.customName;
     }
 
-    // 2. 尝试从凭据文件路径提取名称（自动从文件名识别账号）
-    const mapping = PROVIDER_MAPPINGS.find(m => m.providerType === providerType);
-    const credPathKey = mapping ? mapping.credPathKey : null;
-
-    // 只有当键名包含 'PATH' 或 'FILE' 时，才将其视为文件路径进行解析
-    if (credPathKey && provider[credPathKey] && (credPathKey.includes('PATH') || credPathKey.includes('FILE'))) {
-        const filePath = provider[credPathKey];
-        // 提取文件名（不含扩展名）作为显示名称，例如 account-a.json -> account-a
-        const fileName = path.basename(filePath, path.extname(filePath));
-        if (fileName) return fileName;
-    }
-
-    // 3. 兜底显示 UUID
+    // 2. 兜底显示 UUID（与提供商池管理一致，使用完整 UUID）
     if (provider.uuid) {
         return provider.uuid;
     }
