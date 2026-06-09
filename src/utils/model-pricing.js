@@ -37,7 +37,24 @@ function buildPriceCandidates() {
  * 反算的cache_creation_input_tokens全部等于0, 
  * cache_read_input_tokens全部等于input_tokens
  */
-const CREDIT_TO_USD = 0.15; 
+// ─────────────────────────────────────────────────────────────────────────────
+// Credit → USD 换算率说明
+//
+// Kiro 上游返回的 meteringCredits 是一个抽象计费积分，不是标准货币单位。
+// 从实测数据反推，其真实美元价值与请求类型强相关：
+//
+//   CREDIT_TO_USD（0.15）：用于"大请求"路径，即上下文窗口中存在大量历史缓存的情况。
+//     此时 cache_read token 数量多，按 0.15 折算与实际费用吻合。
+//     若用 0.02 折算大请求，会严重低估总成本，导致 cache_creation 反算溢出。
+//
+//   CREDIT_TO_USD_LOW（0.02）：用于"小请求"路径，即本轮几乎只有普通未缓存输入。
+//     实测：17 个普通 token 的 curl 请求，用 0.15 折算后反算出 399 cache_creation，
+//     明显错误；换成 0.02 后，regular 覆盖大部分 inputCost，cache 分量接近 0，符合实际。
+//
+// 两个常量均为经验值，未来如 Kiro 调整计费标准需重新标定。
+// ─────────────────────────────────────────────────────────────────────────────
+const CREDIT_TO_USD = 0.15;
+const CREDIT_TO_USD_LOW = 0.02;
 
 let priceData = null;
 let sortedKeys = null;
@@ -213,9 +230,84 @@ export function getCreditToUsd() {
     return CREDIT_TO_USD;
 }
 
-export function calculateCacheTokens(meteringCredits, inputTokens, outputTokens, modelId) {
+/**
+ * 反算缓存 token 分布（cache_creation / cache_read）。
+ *
+ * ── 背景 ──────────────────────────────────────────────────────────────────
+ * Kiro 上游不返回分类 token 数，只返回 meteringCredits（计费积分）和
+ * contextUsagePercentage（上下文窗口占用率）。
+ *
+ * 调用方用 contextUsagePercentage * contextWindow 推算出 inputTokens（总输入量，
+ * 含历史缓存），再交给本函数拆分出 cache_creation / cache_read 两部分，
+ * 最终组装成 Anthropic 标准 usage 结构返回给客户端。
+ *
+ * ── 定价模型 ──────────────────────────────────────────────────────────────
+ * Anthropic 真实定价是三类输入：
+ *   inputCost = regular × inputPrice
+ *             + creation × createPrice
+ *             + read    × readPrice
+ *
+ * 但已知量只有 meteringCredits 和 inputTokens，三个未知数，方程欠定。
+ * 因此需要额外假设来收敛，本函数用请求规模来区分两条路径：
+ *
+ * ── 路径选择（_cr_limit） ─────────────────────────────────────────────────
+ * _cr_limit = effectiveMaxTokens × outputPrice / CREDIT_TO_USD_LOW
+ *
+ *   含义：如果本次实际消耗的 credits 连"将 max_tokens 全部输出"都不够，
+ *         则本轮几乎没有大量历史缓存，属于小请求。
+ *   effectiveMaxTokens：优先用请求体的 max_tokens；未传则保守取 256。
+ *
+ * ── 小请求路径（meteringCredits < _cr_limit）────────────────────────────
+ *   假设：regular ≈ localInputTokens（本地 tokenizer 直接估算，不含历史缓存）
+ *   换算率：CREDIT_TO_USD_LOW = 0.02
+ *
+ *   公式：
+ *     totalCost   = credits × 0.02
+ *     inputCost   = totalCost − outputTokens × outputPrice
+ *     regularCost = localInputTokens × inputPrice
+ *     remainCost  = inputCost − regularCost         ← 剩余成本由 create/read 解释
+ *     remainTok   = inputTokens − localInputTokens  ← 剩余 token 由 create/read 解释
+ *     creation    = (remainCost − remainTok × readPrice) / (createPrice − readPrice)
+ *     read        = remainTok − creation
+ *
+ *   典型结果：普通的 17-token curl 请求，regular=17，creation≈0，read≈0。
+ *
+ * ── 大请求路径（meteringCredits ≥ _cr_limit）────────────────────────────
+ *   假设：regular ≈ 0，所有输入非 cache_read 即 cache_creation
+ *   换算率：CREDIT_TO_USD = 0.15
+ *
+ *   公式（原 2-class 公式，不变）：
+ *     creation = (inputCost − inputTokens × readPrice) / (createPrice − readPrice)
+ *     read     = inputTokens − creation
+ *
+ * ── 已知局限 ──────────────────────────────────────────────────────────────
+ * 两条路径都是近似，换算率均为经验值，如 Kiro 调整计费需重新标定。
+ * 路径判断本身也依赖 localInputTokens 准确性（tokenizer 本地估算，非上游精确值）。
+ *
+ * @param {number} meteringCredits      上游返回的计费积分
+ * @param {number} inputTokens          contextUsagePercentage 换算的总输入 token 数（含历史缓存）
+ * @param {number} outputTokens         本次响应的输出 token 数
+ * @param {string} modelId              价格表 model id（映射前的客户端 id）
+ * @param {number} [localInputTokens=0] 本地 tokenizer 估算的本轮请求输入 token 数（不含历史缓存）
+ * @param {number} [maxTokens=0]        请求体中的 max_tokens 参数；0 表示未传，使用保守默认值 256
+ * @returns {{ cacheCreationTokens: number, cacheReadTokens: number }}
+ */
+export function calculateCacheTokens(meteringCredits, inputTokens, outputTokens, modelId, localInputTokens = 0, maxTokens = 0) {
     if (!meteringCredits || inputTokens <= 0) {
         return { cacheCreationTokens: 0, cacheReadTokens: 0 };
+    }
+
+    // 小 context 保护：localInputTokens < 200 时反算误差极大（credits 本身接近 0），跳过正常路径。
+    // 返回一个保守估算：将本地 token 数按 input_price/cache_creation_price 比例（≈3/3.75）折算为
+    // cache_creation_tokens，cache_read=0。这是经验近似，不代表真实缓存行为。
+    // 如实际观察效果不理想，删除此 if 块即可回退到正常路径。
+    if (localInputTokens < 200) {
+        logger.info(
+            `[Model Pricing] Skip cache calc (localInputTokens < 200): model=${modelId}` +
+            `, credits=${meteringCredits}, inputTokens=${inputTokens}, localInput=${localInputTokens}` +
+            `, outputTokens=${outputTokens}`
+        );
+        return { cacheCreationTokens: Math.round(localInputTokens*3/3.75), cacheReadTokens: 0 };
     }
 
     const pricing = getModelPricing(modelId);
@@ -223,41 +315,84 @@ export function calculateCacheTokens(meteringCredits, inputTokens, outputTokens,
         return { cacheCreationTokens: 0, cacheReadTokens: 0 };
     }
 
-    const totalCost = meteringCredits * CREDIT_TO_USD;
-    const outputCost = outputTokens * pricing.output_cost_per_token;
-    const inputCost = Math.max(0, totalCost - outputCost);
-
-    const cacheReadPrice = pricing.cache_read_input_token_cost;
+    const cacheReadPrice   = pricing.cache_read_input_token_cost;
     const cacheCreatePrice = pricing.cache_creation_input_token_cost;
+    // input_cost_per_token 未必存在于所有价格条目，回退到 cacheReadPrice 作保守下限
+    const inputPrice = pricing.input_cost_per_token || cacheReadPrice;
 
-    logger.info(`[Model Pricing] Calc: model=${modelId}, credits=${meteringCredits}, totalCost=$${totalCost.toFixed(6)}, outputCost=$${outputCost.toFixed(6)}, inputCost=$${inputCost.toFixed(6)}, inputTokens=${inputTokens}, cacheReadPrice=${cacheReadPrice}, cacheCreatePrice=${cacheCreatePrice}`);
+    // ── _cr_limit 计算 ──────────────────────────────────────────────────────
+    // 若 credits < _cr_limit，说明本轮连"max_tokens 全输出"的费用都不到，
+    // 不可能有大量历史缓存消耗，走小请求路径。
+    // 未传 max_tokens 时用 256 作保守估算（避免 _cr_limit=0 导致所有请求走小路径）。
+    const effectiveMaxTokens = maxTokens > 0 ? maxTokens : 256;
+    const crLimit       = (effectiveMaxTokens * pricing.output_cost_per_token) / CREDIT_TO_USD_LOW;
+    const isSmallRequest = meteringCredits < crLimit;
 
-    if (cacheCreatePrice === cacheReadPrice) {
-        return { cacheCreationTokens: 0, cacheReadTokens: inputTokens };
+    let totalCost, inputCost, cacheCreationTokens, cacheReadTokens;
+
+    if (isSmallRequest && localInputTokens > 0) {
+        // ── 小请求路径：3-class 公式 ────────────────────────────────────────
+        // regular 固定为本地 tokenizer 估算值，剩余部分再用 2-class 拆 creation/read。
+        totalCost = meteringCredits * CREDIT_TO_USD_LOW;
+        const outputCost  = outputTokens * pricing.output_cost_per_token;
+        inputCost = Math.max(0, totalCost - outputCost);
+
+        // regularTokens 不超过 inputTokens（防御：本地估算偶尔会高于上游总量）
+        const regularTokens  = Math.min(localInputTokens, inputTokens);
+        const regularCost    = regularTokens * inputPrice;
+        const remainingCost  = Math.max(0, inputCost - regularCost);
+        const remainingTokens = Math.max(0, inputTokens - regularTokens);
+
+        if (remainingTokens <= 0 || cacheCreatePrice === cacheReadPrice) {
+            // 无剩余 token 可拆，或 create/read 同价无意义拆分
+            cacheCreationTokens = 0;
+            cacheReadTokens     = 0;
+        } else {
+            // 对剩余部分再做 2-class 拆分
+            let creation = (remainingCost - remainingTokens * cacheReadPrice) / (cacheCreatePrice - cacheReadPrice);
+            creation = Math.max(0, Math.min(creation, remainingTokens));
+            cacheCreationTokens = Math.round(creation);
+            cacheReadTokens     = Math.max(0, remainingTokens - cacheCreationTokens);
+        }
+
+        logger.info(
+            `[Model Pricing] Calc(3-class): model=${modelId}` +
+            `, credits=${meteringCredits}, crLimit=${crLimit.toFixed(6)}` +
+            `, totalCost=$${totalCost.toFixed(6)}` +
+            `, outputCost=$${(outputTokens * pricing.output_cost_per_token).toFixed(6)}` +
+            `, inputCost=$${inputCost.toFixed(6)}` +
+            `, inputTokens=${inputTokens}, localInput=${localInputTokens}` +
+            `, regular=${regularTokens}` +
+            `, cacheCreate=${cacheCreationTokens}, cacheRead=${cacheReadTokens}`
+        );
+    } else {
+        // ── 大请求路径：原 2-class 公式 ─────────────────────────────────────
+        // 假设 regular≈0，所有输入非 cache_read 即 cache_creation。
+        // 适用于上下文窗口有大量历史缓存的正常 Claude Code 会话。
+        totalCost = meteringCredits * CREDIT_TO_USD;
+        const outputCost = outputTokens * pricing.output_cost_per_token;
+        inputCost = Math.max(0, totalCost - outputCost);
+
+        logger.info(
+            `[Model Pricing] Calc(2-class): model=${modelId}` +
+            `, credits=${meteringCredits}, crLimit=${crLimit.toFixed(6)}` +
+            `, totalCost=$${totalCost.toFixed(6)}` +
+            `, outputCost=$${outputCost.toFixed(6)}` +
+            `, inputCost=$${inputCost.toFixed(6)}` +
+            `, inputTokens=${inputTokens}` +
+            `, cacheReadPrice=${cacheReadPrice}, cacheCreatePrice=${cacheCreatePrice}`
+        );
+
+        if (cacheCreatePrice === cacheReadPrice) {
+            // 同价时无法区分，全部归入 cacheRead（计费等价）
+            return { cacheCreationTokens: 0, cacheReadTokens: inputTokens };
+        }
+
+        let creation = (inputCost - inputTokens * cacheReadPrice) / (cacheCreatePrice - cacheReadPrice);
+        creation = Math.max(0, Math.min(creation, inputTokens));
+        cacheCreationTokens = Math.round(creation);
+        cacheReadTokens     = Math.max(0, inputTokens - cacheCreationTokens);
     }
-
-    /*
-    ### 1. 反算公式对"首次(无缓存)请求"会严重误报 (model-pricing.js:104)
-
-    ```js
-    let creation = (inputCost - inputTokens * cacheReadPrice) / (cacheCreatePrice - cacheReadPrice);
-    ```
-
-    这个公式假设 **所有输入 token 非 cache_read 即 cache_creation**,没有考虑"普通未缓存输入"这一类。真实定价模型是三类:
-    ```
-    input_cost = regular * input_price + cache_create * create_price + cache_read * read_price
-    ```
-
-    代入 Anthropic 典型价格 (`input = 3e-6`, `create = 3.75e-6`, `read = 3e-7`):
-    - 纯普通输入 `N` 个 token,真实成本 = `N * 3e-6`0}` 而非强行拆分。
-    - 或者在代码和返回值里明确标注这是"估算值",供客户端知情使用。
-    - 文档里记一笔这一简化假设的已知偏差。
-    */
-    let creation = (inputCost - inputTokens * cacheReadPrice) / (cacheCreatePrice - cacheReadPrice);
-    creation = Math.max(0, Math.min(creation, inputTokens));
-
-    const cacheCreationTokens = Math.round(creation);
-    const cacheReadTokens = Math.max(0, inputTokens - cacheCreationTokens);
 
     return { cacheCreationTokens, cacheReadTokens };
 }

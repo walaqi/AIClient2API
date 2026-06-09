@@ -711,6 +711,9 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         // The service returns a stream in its native format (toProvider).
         const needsConversion = getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider);
         requestBody.model = model;
+        if (toProvider === MODEL_PROVIDER.KIRO_API) {
+            logger.debug(`[AI-MON] converted request (stream): ${JSON.stringify(requestBody)}`);
+        }
         const nativeStream = await service.generateContentStream(model, requestBody);
         const addEvent = getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.CLAUDE || getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
         // 为每个请求生成唯一 ID，用于在单例 converter 中隔离并发流状态
@@ -942,9 +945,10 @@ export async function handleStreamRequest(res, service, model, requestBody, from
 
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
-            // 400 报错码通常是请求参数问题，不记录为提供商错误
-            if (error.response?.status === 400) {
-                logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
+            // 400 报错码或客户端请求体问题，不记录为提供商错误
+            const isClientError = error.response?.status === 400 || error.message === 'No messages found in request body';
+            if (isClientError) {
+                logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to client error: ${error.message}`);
             } else {
                 logger.info(`[Provider Pool] Marking ${toProvider} as unhealthy due to stream error (status: ${status || 'unknown'})`);
                 // 如果是号池模式，并且请求处理失败，则标记当前使用的提供者为不健康
@@ -954,12 +958,12 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 credentialMarkedUnhealthy = true;
             }
         }
-        
+
         // 如果需要切换凭证（无论是否标记不健康），都设置标记以触发重试
         if (shouldSwitchCredential && !credentialMarkedUnhealthy) {
             credentialMarkedUnhealthy = true; // 触发下面的重试逻辑
         }
-        
+
         // 凭证已被标记为不健康后，尝试切换到新凭证重试
         // 不再依赖状态码判断，只要凭证被标记不健康且可以重试，就尝试切换
         if (credentialMarkedUnhealthy && currentRetry < maxRetries && providerPoolManager && CONFIG) {
@@ -1107,8 +1111,15 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         const needsConversion = getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider);
         requestBody.model = model;
         // fs.writeFile('oldRequest'+Date.now()+'.json', JSON.stringify(requestBody));
+        if (toProvider === MODEL_PROVIDER.KIRO_API) {
+            logger.debug(`[AI-MON] converted request (non-stream): ${JSON.stringify(requestBody)}`);
+        }
         const nativeResponse = await service.generateContent(model, requestBody);
         const responseText = extractResponseText(nativeResponse, toProvider);
+
+        if (toProvider === MODEL_PROVIDER.KIRO_API) {
+            logger.debug(`[AI-MON] upstream response (non-stream): ${JSON.stringify(nativeResponse)}`);
+        }
 
         // Convert the response back to the client's format (fromProvider), if necessary.
         let clientResponse = nativeResponse;
@@ -1211,9 +1222,10 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
 
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
-            // 400 报错码通常是请求参数问题，不记录为提供商错误
-            if (error.response?.status === 400) {
-                logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
+            // 400 报错码或客户端请求体问题，不记录为提供商错误
+            const isClientError = error.response?.status === 400 || error.message === 'No messages found in request body';
+            if (isClientError) {
+                logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to client error: ${error.message}`);
             } else {
                 logger.info(`[Provider Pool] Marking ${toProvider} as unhealthy due to unary error (status: ${status || 'unknown'})`);
                 // 如果是号池模式，并且请求处理失败，则标记当前使用的提供者为不健康
@@ -1620,7 +1632,11 @@ export async function handleContentGenerationRequest(req, res, service, endpoint
     // 当没有不同的健康凭证可用时，重试会自动停止
     const credentialSwitchMaxRetries = CONFIG.CREDENTIAL_SWITCH_MAX_RETRIES || 5;
     const retryContext = { CONFIG, currentRetry: 0, maxRetries: credentialSwitchMaxRetries };
-    
+
+    if (toProvider === MODEL_PROVIDER.KIRO_API) {
+        logger.debug(`[AI-MON] origin request: ${JSON.stringify(originalRequestBody)}`);
+    }
+
     if (isStream) {
         await handleStreamRequest(res, service, model, processedRequestBody, fromProvider, toProvider, CONFIG.PROMPT_LOG_MODE, PROMPT_LOG_FILENAME, providerPoolManager, actualUuid, actualCustomName, retryContext);
     } else {

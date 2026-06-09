@@ -56,11 +56,19 @@ class OpenAIStrategy extends ProviderStrategy {
             return requestBody;
         }
 
-        const existingSystemText = extractSystemPromptFromRequestBody(requestBody, MODEL_PROTOCOL_PREFIX.OPENAI);
+        const systemMsg = requestBody.messages?.find(m => m.role === 'system' || m.role === 'developer');
+        let existingSystemText = systemMsg?.content || '';
+        if (typeof existingSystemText === 'object' && existingSystemText !== null) {
+            existingSystemText = Array.isArray(existingSystemText)
+                ? existingSystemText.map(item => (typeof item === 'string' ? item : item.text || JSON.stringify(item))).join('\n')
+                : JSON.stringify(existingSystemText);
+        }
 
         const newSystemText = config.SYSTEM_PROMPT_MODE === 'append' && existingSystemText
             ? `${existingSystemText}\n${filePromptContent}`
-            : filePromptContent;
+            : config.SYSTEM_PROMPT_MODE === 'head' && existingSystemText
+                ? `${filePromptContent}\n${existingSystemText}`
+                : filePromptContent;
 
         // Apply system prompt replacements
         const finalSystemText = applySystemPromptReplacements(newSystemText, config.SYSTEM_PROMPT_REPLACEMENTS);
@@ -75,6 +83,7 @@ class OpenAIStrategy extends ProviderStrategy {
             requestBody.messages.unshift({ role: 'system', content: finalSystemText });
         }
         logger.info(`[System Prompt] Applied system prompt from ${config.SYSTEM_PROMPT_FILE_PATH} in '${config.SYSTEM_PROMPT_MODE}' mode for provider 'openai'.`);
+        // TODO: set requestBody._injectedSystemTokens for count_tokens alignment — see claude-strategy.js for reference
 
         return requestBody;
     }

@@ -292,15 +292,12 @@ export class OpenAIConverter extends BaseConverter {
 
         const claudeRequest = {
             model: openaiRequest.model,
+            ...(systemInstruction ? { system: extractText(systemInstruction.parts[0].text) } : {}),
             messages: mergedClaudeMessages,
             max_tokens: checkAndAssignOrDefault(openaiRequest.max_tokens, CLAUDE_DEFAULT_MAX_TOKENS),
             temperature: checkAndAssignOrDefault(openaiRequest.temperature, CLAUDE_DEFAULT_TEMPERATURE),
             top_p: checkAndAssignOrDefault(openaiRequest.top_p, CLAUDE_DEFAULT_TOP_P),
         };
-
-        if (systemInstruction) {
-            claudeRequest.system = extractText(systemInstruction.parts[0].text);
-        }
 
         if (openaiRequest.tools?.length) {
             claudeRequest.tools = openaiRequest.tools

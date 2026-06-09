@@ -47,11 +47,16 @@ class GeminiStrategy extends ProviderStrategy {
             return requestBody;
         }
 
-        const existingSystemText = extractSystemPromptFromRequestBody(requestBody, MODEL_PROTOCOL_PREFIX.GEMINI);
+        const systemInstruction = requestBody.system_instruction || requestBody.systemInstruction;
+        const existingSystemText = systemInstruction?.parts
+            ? systemInstruction.parts.filter(p => p?.text).map(p => p.text).join('\n')
+            : '';
 
         const newSystemText = config.SYSTEM_PROMPT_MODE === 'append' && existingSystemText
             ? `${existingSystemText}\n${filePromptContent}`
-            : filePromptContent;
+            : config.SYSTEM_PROMPT_MODE === 'head' && existingSystemText
+                ? `${filePromptContent}\n${existingSystemText}`
+                : filePromptContent;
 
         // Apply system prompt replacements
         const finalSystemText = applySystemPromptReplacements(newSystemText, config.SYSTEM_PROMPT_REPLACEMENTS);
@@ -61,6 +66,7 @@ class GeminiStrategy extends ProviderStrategy {
             delete requestBody.system_instruction;
         }
         logger.info(`[System Prompt] Applied system prompt from ${config.SYSTEM_PROMPT_FILE_PATH} in '${config.SYSTEM_PROMPT_MODE}' mode for provider 'gemini'.`);
+        // TODO: set requestBody._injectedSystemTokens for count_tokens alignment — see claude-strategy.js for reference
 
         return requestBody;
     }

@@ -66,9 +66,15 @@ class ResponsesAPIStrategy extends ProviderStrategy {
             return requestBody;
         }
 
+        // BUG: existingSystemText is never declared in this scope — append/head branches always
+        // evaluate the condition as falsy, falling through to filePromptContent only.
+        // Fix when needed: extract existingSystemText from requestBody.instructions or input array,
+        // similar to how openai-strategy.js reads it from messages.
         const newSystemText = config.SYSTEM_PROMPT_MODE === 'append' && existingSystemText
             ? `${existingSystemText}\n${filePromptContent}`
-            : filePromptContent;
+            : config.SYSTEM_PROMPT_MODE === 'head' && existingSystemText
+                ? `${filePromptContent}\n${existingSystemText}`
+                : filePromptContent;
 
         // Apply system prompt replacements
         const finalSystemText = applySystemPromptReplacements(newSystemText, config.SYSTEM_PROMPT_REPLACEMENTS);

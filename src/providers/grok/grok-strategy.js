@@ -44,10 +44,13 @@ class GrokStrategy extends ProviderStrategy {
         const existingMessage = requestBody.message || "";
         const newSystemText = config.SYSTEM_PROMPT_MODE === 'append'
             ? `${existingMessage}\n\nSystem: ${finalFilePrompt}`
-            : `System: ${finalFilePrompt}\n\n${existingMessage}`;
+            : config.SYSTEM_PROMPT_MODE === 'head'
+                ? `System: ${finalFilePrompt}\n\n${existingMessage}`
+                : `System: ${finalFilePrompt}\n\n${existingMessage}`;
 
         requestBody.message = newSystemText;
         logger.info(`[System Prompt] Applied system prompt for Grok in '${config.SYSTEM_PROMPT_MODE}' mode.`);
+        // TODO: set requestBody._injectedSystemTokens for count_tokens alignment — see claude-strategy.js for reference
 
         return requestBody;
     }

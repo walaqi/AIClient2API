@@ -209,7 +209,7 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         { flag: '--port',                 configKey: 'SERVER_PORT',            type: 'int' },
         { flag: '--model-provider',       configKey: 'MODEL_PROVIDER',         type: 'string' },
         { flag: '--system-prompt-file',   configKey: 'SYSTEM_PROMPT_FILE_PATH', type: 'string' },
-        { flag: '--system-prompt-mode',   configKey: 'SYSTEM_PROMPT_MODE',     type: 'enum', validValues: ['overwrite', 'append'] },
+        { flag: '--system-prompt-mode',   configKey: 'SYSTEM_PROMPT_MODE',     type: 'enum', validValues: ['overwrite', 'append', 'head'] },
         { flag: '--host',                 configKey: 'HOST',                   type: 'string' },
         { flag: '--prompt-log-base-name', configKey: 'PROMPT_LOG_BASE_NAME',   type: 'string' },
         { flag: '--request-max-retries',  configKey: 'REQUEST_MAX_RETRIES',    type: 'int' },
