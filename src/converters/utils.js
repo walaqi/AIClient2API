@@ -145,6 +145,140 @@ export function applySystemPromptReplacements(content, replacements = []) {
 }
 
 /**
+ * 对客户端请求体中已有的 system prompt 进行内容替换（in-place）。
+ * 与 SYSTEM_PROMPT_FILE_PATH/CONTENT 解耦，确保即便没有文件注入也会生效。
+ * 不同协议的 system 字段形态不同，按协议前缀分发处理。
+ *
+ * @param {Object} requestBody - 请求体（会被原地修改）
+ * @param {Array} replacements - 替换规则数组
+ * @param {string} protocolPrefix - 协议前缀（claude/openai/gemini/...）
+ */
+export function applyReplacementsToClientSystem(requestBody, replacements, protocolPrefix) {
+    if (!requestBody || !replacements || !Array.isArray(replacements) || replacements.length === 0) {
+        return;
+    }
+
+    const replaceMessageContent = (msg) => {
+        if (!msg) return;
+        if (typeof msg.content === 'string') {
+            msg.content = applySystemPromptReplacements(msg.content, replacements);
+        } else if (Array.isArray(msg.content)) {
+            for (const part of msg.content) {
+                if (part && typeof part === 'object' && typeof part.text === 'string') {
+                    part.text = applySystemPromptReplacements(part.text, replacements);
+                }
+            }
+        }
+    };
+
+    switch (protocolPrefix) {
+        case 'claude': {
+            const sys = requestBody.system;
+            if (Array.isArray(sys)) {
+                for (const block of sys) {
+                    if (block && block.type === 'text' && typeof block.text === 'string') {
+                        block.text = applySystemPromptReplacements(block.text, replacements);
+                    }
+                }
+            } else if (typeof sys === 'string') {
+                requestBody.system = applySystemPromptReplacements(sys, replacements);
+            }
+            break;
+        }
+        case 'gemini': {
+            const si = requestBody.systemInstruction || requestBody.system_instruction;
+            if (si && Array.isArray(si.parts)) {
+                for (const part of si.parts) {
+                    if (part && typeof part.text === 'string') {
+                        part.text = applySystemPromptReplacements(part.text, replacements);
+                    }
+                }
+            }
+            break;
+        }
+        case 'openaiResponses':
+        case 'codex': {
+            if (typeof requestBody.instructions === 'string') {
+                requestBody.instructions = applySystemPromptReplacements(requestBody.instructions, replacements);
+            }
+            if (Array.isArray(requestBody.input)) {
+                for (const item of requestBody.input) {
+                    if (item && (item.role === 'system' || item.role === 'developer'
+                        || item.type === 'system' || item.type === 'developer')) {
+                        replaceMessageContent(item);
+                    }
+                }
+            }
+            break;
+        }
+        case 'grok': {
+            // Grok 的 system 已合并进 message，无独立 system 字段，no-op。
+            break;
+        }
+        case 'openai':
+        case 'forward':
+        default: {
+            if (Array.isArray(requestBody.messages)) {
+                for (const msg of requestBody.messages) {
+                    if (msg && (msg.role === 'system' || msg.role === 'developer')) {
+                        replaceMessageContent(msg);
+                    }
+                }
+            }
+            break;
+        }
+    }
+}
+
+/**
+ * 对客户端请求体中 tools 数组里的工具描述（description）应用替换规则（in-place）。
+ * 与 SYSTEM_PROMPT_REPLACEMENTS / applyReplacementsToClientSystem 完全解耦：
+ * 仅作用于 Anthropic / Kiro 形态的 tools[].description，不触碰 system / messages，
+ * 也不处理 OpenAI 的 tools[].function.description 与 Gemini 的 functionDeclarations。
+ *
+ * 规则格式（强制按 tool 名定向，大小写敏感）：
+ *   { "tool": "Bash", "old": "...", "new": "..." }
+ * - tool 字段必填且为字符串，与 tools[i].name 精确匹配（大小写敏感）
+ * - 缺少 tool 字段、tool 非字符串、或 tool 在当前请求中不存在的规则，均被静默丢弃
+ *   （前者额外打一条 warn 提示用户改配置；后者是常态，不打日志）
+ * - 多条规则按数组顺序对同一 tool 依次应用，前一条结果作为后一条输入
+ *
+ * @param {Object} requestBody - 请求体（会被原地修改）
+ * @param {Array} replacements - 替换规则数组
+ */
+export function applyReplacementsToToolDescriptions(requestBody, replacements) {
+    if (!requestBody || !replacements || !Array.isArray(replacements) || replacements.length === 0) {
+        return;
+    }
+    if (!Array.isArray(requestBody.tools)) {
+        return;
+    }
+
+    // 按 tool 名分桶，规则数组顺序在桶内保留
+    const rulesByTool = new Map();
+    for (const rule of replacements) {
+        if (!rule || typeof rule !== 'object') continue;
+        if (typeof rule.tool !== 'string' || rule.tool === '') {
+            logger.warn(`[ToolDescReplace] Skipping rule without 'tool' field: ${JSON.stringify(rule).slice(0, 200)}`);
+            continue;
+        }
+        if (rule.old === undefined || rule.new === undefined) continue;
+        if (!rulesByTool.has(rule.tool)) rulesByTool.set(rule.tool, []);
+        rulesByTool.get(rule.tool).push(rule);
+    }
+    if (rulesByTool.size === 0) return;
+
+    for (const tool of requestBody.tools) {
+        if (!tool || typeof tool !== 'object') continue;
+        if (typeof tool.name !== 'string') continue;
+        const rules = rulesByTool.get(tool.name);
+        if (!rules) continue; // 当前请求没有该 tool, 静默丢弃
+        if (typeof tool.description !== 'string') continue;
+        tool.description = applySystemPromptReplacements(tool.description, rules);
+    }
+}
+
+/**
  * 提取并处理系统消息
  * @param {Array} messages - 消息数组
  * @param {Array} replacements - 替换规则数组，可选

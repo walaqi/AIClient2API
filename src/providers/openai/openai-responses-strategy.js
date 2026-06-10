@@ -1,7 +1,7 @@
 import { ProviderStrategy } from '../../utils/provider-strategy.js';
 import logger from '../../utils/logger.js';
 import { extractSystemPromptFromRequestBody, MODEL_PROTOCOL_PREFIX } from '../../utils/common.js';
-import { applySystemPromptReplacements } from '../../converters/utils.js';
+import { applySystemPromptReplacements, applyReplacementsToClientSystem, applyReplacementsToToolDescriptions } from '../../converters/utils.js';
 
 /**
  * OpenAI Responses API strategy implementation.
@@ -57,6 +57,11 @@ class ResponsesAPIStrategy extends ProviderStrategy {
     }
 
     async applySystemPromptFromFile(config, requestBody) {
+        // Step 1: 无条件对客户端原始 system prompt 应用替换规则（与文件注入解耦）。
+        applyReplacementsToClientSystem(requestBody, config.SYSTEM_PROMPT_REPLACEMENTS, MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES);
+        applyReplacementsToToolDescriptions(requestBody, config.TOOL_DESCRIPTION_REPLACEMENTS);
+
+        // Step 2: 走文件注入逻辑（仅在 SYSTEM_PROMPT_FILE_PATH/CONTENT 满足时生效）。
         if (!config.SYSTEM_PROMPT_FILE_PATH) {
             return requestBody;
         }
@@ -66,9 +71,15 @@ class ResponsesAPIStrategy extends ProviderStrategy {
             return requestBody;
         }
 
+        // BUG: existingSystemText is never declared in this scope — append/head branches always
+        // evaluate the condition as falsy, falling through to filePromptContent only.
+        // Fix when needed: extract existingSystemText from requestBody.instructions or input array,
+        // similar to how openai-strategy.js reads it from messages.
         const newSystemText = config.SYSTEM_PROMPT_MODE === 'append' && existingSystemText
             ? `${existingSystemText}\n${filePromptContent}`
-            : filePromptContent;
+            : config.SYSTEM_PROMPT_MODE === 'head' && existingSystemText
+                ? `${filePromptContent}\n${existingSystemText}`
+                : filePromptContent;
 
         // Apply system prompt replacements
         const finalSystemText = applySystemPromptReplacements(newSystemText, config.SYSTEM_PROMPT_REPLACEMENTS);

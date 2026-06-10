@@ -85,5 +85,11 @@
     },
 
     "_tokenBufferReserve_NOTES_": "Kiro 历史裁剪的 token 缓冲预留。裁剪上限 = 模型上下文 - tokenBufferReserve，给 currentMessage + tools + 输出留空间。省略时默认 50000，取值会被 clamp 到 [5000, 150000]。仅作用于 claude-kiro-oauth provider。",
-    "tokenBufferReserve": 50000
+    "tokenBufferReserve": 50000,
+    "_TOOL_DESCRIPTION_REPLACEMENTS":"用于替换工具描述. 内容中的换行必须使用\n来进行替换,不能写真换行",
+    "TOOL_DESCRIPTION_REPLACEMENTS": [
+      { "tool": "Bash", "old": "git push --force", "new": "(redacted)" },
+      { "tool": "Bash", "old": "long boilerplate paragraph...", "new": "" },
+      { "tool": "Read", "old": "By default, it reads up to 2000 lines", "new": "Reads up to 2000 lines" }
+    ]
 }

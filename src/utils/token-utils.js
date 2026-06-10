@@ -75,12 +75,12 @@ export function countTextTokens(text) {
  */
 export function estimateInputTokens(requestBody) {
     let allText = "";
-    
+
     // Count system prompt tokens
     if (requestBody.system) {
         allText += processContent(requestBody.system);
     }
-    
+
     // Count thinking prefix tokens if thinking is enabled
     if (requestBody.thinking?.type && typeof requestBody.thinking.type === 'string') {
         const t = requestBody.thinking.type.toLowerCase().trim();
@@ -102,7 +102,7 @@ else if (t === 'adaptive') {
             allText += `<thinking_mode>adaptive</thinking_mode><thinking_effort>${normalizedEffort}</thinking_effort>`;
         }
     }
-    
+
     // Count all messages tokens
     if (requestBody.messages && Array.isArray(requestBody.messages)) {
         for (const message of requestBody.messages) {
@@ -111,13 +111,17 @@ else if (t === 'adaptive') {
             }
         }
     }
-    
+
     // Count tools definitions tokens if present
     if (requestBody.tools && Array.isArray(requestBody.tools)) {
         allText += JSON.stringify(requestBody.tools);
     }
-    
-    return countTextTokens(allText);
+
+    const total = countTextTokens(allText);
+    // Subtract injected system prompt tokens so the estimate aligns with the
+    // pre-injection count_tokens view (set by applySystemPromptFromFile in claude-strategy).
+    const injected = requestBody._injectedSystemTokens || 0;
+    return Math.max(0, total - injected);
 }
 
 /**

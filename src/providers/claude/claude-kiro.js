@@ -633,6 +633,88 @@ function trimHistoryByTokens(payload, maxTokens) {
     return { trimmed: totalTrimmed, finalTokens: currentTokens, iterations };
 }
 
+// 将文本截断到不超过 tokenLimit 个 token（用于 max_tokens 手动模拟）。
+// 采用二分搜索定位字符截断点，避免逐字符遍历的高开销。
+// countFn: (text: string) => number，调用方传入 this.countTextTokens 的绑定版本。
+function truncateToTokenLimit(text, tokenLimit, countFn) {
+    if (!text || tokenLimit <= 0) return '';
+    if (countFn(text) <= tokenLimit) return text;
+    let lo = 0, hi = text.length;
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (countFn(text.slice(0, mid)) <= tokenLimit) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return text.slice(0, lo);
+}
+
+/**
+ * 在 text 中查找 stopSequences 中最早出现的序列。
+ * 返回 { index, sequence } 或 null。
+ */
+function findFirstStopSequence(text, stopSequences) {
+    let earliest = null;
+    for (const seq of stopSequences) {
+        if (!seq) continue;
+        const idx = text.indexOf(seq);
+        if (idx !== -1 && (earliest === null || idx < earliest.index)) {
+            earliest = { index: idx, sequence: seq };
+        }
+    }
+    return earliest;
+}
+
+/**
+ * 对内容（string 或 content block 数组）应用 stop_sequences 截断。
+ * 返回 { hit: bool, content: truncated, sequence: string|null }。
+ */
+function truncateAtStopSequence(content, stopSequences) {
+    if (!stopSequences || stopSequences.length === 0) return { hit: false, content, sequence: null };
+
+    if (typeof content === 'string') {
+        const hit = findFirstStopSequence(content, stopSequences);
+        if (!hit) return { hit: false, content, sequence: null };
+        return { hit: true, content: content.slice(0, hit.index), sequence: hit.sequence };
+    }
+
+    if (Array.isArray(content)) {
+        let charOffset = 0;
+        let hitSeq = null;
+        let hitAbsIndex = -1;
+        // 收集所有 text 块的拼接文本及偏移，找最早命中
+        const textBlocks = [];
+        for (let i = 0; i < content.length; i++) {
+            const block = content[i];
+            if (block && block.type === 'text' && typeof block.text === 'string') {
+                textBlocks.push({ blockIdx: i, start: charOffset, text: block.text });
+                charOffset += block.text.length;
+            }
+        }
+        const fullText = textBlocks.map(b => b.text).join('');
+        const hit = findFirstStopSequence(fullText, stopSequences);
+        if (!hit) return { hit: false, content, sequence: null };
+        hitAbsIndex = hit.index;
+        hitSeq = hit.sequence;
+
+        // 重建内容数组，对命中点所在的 text 块截断
+        const result = content.map((block, i) => {
+            if (!block || block.type !== 'text' || typeof block.text !== 'string') return block;
+            const tb = textBlocks.find(b => b.blockIdx === i);
+            if (!tb) return block;
+            if (tb.start >= hitAbsIndex) return { ...block, text: '' };
+            const cutInBlock = hitAbsIndex - tb.start;
+            if (cutInBlock >= tb.text.length) return block;
+            return { ...block, text: tb.text.slice(0, cutInBlock) };
+        });
+        return { hit: true, content: result, sequence: hitSeq };
+    }
+
+    return { hit: false, content, sequence: null };
+}
+
 // Phase 3.1: conversationId 稳定化 — 同一会话的多轮请求复用同一个 conversationId, 让 Kiro 服务端 prompt cache 命中.
 // 参考: kiroApi.ts:1015-1054
 const KIRO_CONVERSATION_CACHE_TTL_MS = 2 * 60 * 60 * 1000; // 2h
@@ -1176,40 +1258,7 @@ function getOutputReserveConfig(config) {
     let pressureFactor = Number.parseFloat(config?.OUTPUT_RESERVE_CONTEXT_PRESSURE);
     if (!Number.isFinite(pressureFactor) || pressureFactor < 1.0) pressureFactor = 1.0;
     else if (pressureFactor > 2.0) { pressureFactor = 2.0; }
-    const truncateOn = config?.OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE === true;
-    let truncateMax = Number.parseInt(config?.OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS, 10);
-    if (!Number.isFinite(truncateMax) || truncateMax < 1024) truncateMax = 8192;
-    const adaptiveDesc = config?.OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE === true;
-    return { pressureFactor, truncateOn, truncateMax, adaptiveDesc };
-}
-
-const TOOL_RESULT_RATIOS = { Read: 0.5, Bash: 0.25, Grep: 0.8, Glob: 0.8 };
-
-function truncateHeadTailByTool(text, maxLen, toolName) {
-    if (!text || text.length <= maxLen) return { text, truncated: false };
-    if (text.startsWith('data:image/') || text.startsWith('data:application/')) {
-        return { text, truncated: false };
-    }
-    const headRatio = TOOL_RESULT_RATIOS[toolName] ?? 0.6;
-    const placeholder = `\n\n...[omitted]...\n\n`;
-    const budget = Math.max(0, maxLen - placeholder.length);
-    const headLen = Math.floor(budget * headRatio);
-    const tailLen = budget - headLen;
-    return { text: text.slice(0, headLen) + placeholder + text.slice(-tailLen), truncated: true };
-}
-
-const ADAPTIVE_DESC_TABLE = [[5, 8192], [40, 4096], [90, 2048], [160, 1024]];
-
-function pickAdaptiveDescBudget(n) {
-    if (n <= ADAPTIVE_DESC_TABLE[0][0]) return ADAPTIVE_DESC_TABLE[0][1];
-    const last = ADAPTIVE_DESC_TABLE[ADAPTIVE_DESC_TABLE.length - 1];
-    if (n >= last[0]) return last[1];
-    for (let i = 0; i < ADAPTIVE_DESC_TABLE.length - 1; i++) {
-        const [n1, b1] = ADAPTIVE_DESC_TABLE[i];
-        const [n2, b2] = ADAPTIVE_DESC_TABLE[i + 1];
-        if (n >= n1 && n < n2) return Math.round(b1 + (n - n1) / (n2 - n1) * (b2 - b1));
-    }
-    return 8192;
+    return { pressureFactor };
 }
 
 /**
@@ -1907,7 +1956,7 @@ async saveCredentialsToFile(filePath, newData) {
     /**
      * Build CodeWhisperer request from OpenAI messages
      */
-    async buildCodewhispererRequest(messages, model, tools = null, inSystemPrompt = null, thinking = null) {
+    async buildCodewhispererRequest(messages, model, tools = null, inSystemPrompt = null, thinking = null, maxTokensHint = 0) {
         // Phase 3.1: 同一会话复用 conversationId, 让 Kiro 服务端 prompt cache 命中.
         // sessionHint 优先级: 显式 metadata.session_id > metadata.conversation_id > history fingerprint.
         const sessionHint = (this._currentRequestMetadata && (this._currentRequestMetadata.session_id || this._currentRequestMetadata.conversation_id)) || undefined;
@@ -1960,109 +2009,22 @@ async saveCredentialsToFile(filePath, newData) {
         // 按 model-id 解析能力开关 (nativeThinking / contextCompression).
         const modelCaps = getKiroModelCapabilities(this.config, codewhispererModel, model);
 
-        // 措施 2/3: 获取输出预留配置.
-        // contextCompression=false 时跳过「工具结果截断」与「工具描述自适应缩短」两项压缩措施
-        // (高容量模型如 opus-4.7 上下文 1M, 无需为输出腾空间而压缩输入).
-        const reserve = getOutputReserveConfig(this.config);
-        if (!modelCaps.contextCompression) {
-            if (reserve.truncateOn || reserve.adaptiveDesc) {
-                logger.info(`[Kiro] contextCompression=false for ${codewhispererModel}: skipping tool_result truncate + adaptive tool desc`);
-            }
-            reserve.truncateOn = false;
-            reserve.adaptiveDesc = false;
-        }
-
-        // 措施 2: 构建 tool_use_id → 工具名映射（用于 tool_result 智能截断）
-        const toolUseIdToName = new Map();
-        if (reserve.truncateOn) {
-            for (const m of processedMessages) {
-                if (m.role !== 'assistant' || !Array.isArray(m.content)) continue;
-                for (const part of m.content) {
-                    if (part?.type === 'tool_use' && part.id && part.name) {
-                        toolUseIdToName.set(part.id, part.name);
-                    }
-                }
-            }
-        }
-
         // 相邻同 role 合并 已移除 — Phase 2.3 sanitize pipeline 的 ensureAlternatingMessages 处理
         const toolNameMaps = buildKiroToolNameMaps(tools);
-        
+
         // Phase 2.5: web_search/websearch 过滤已移除 (commit 3e071d4 已迁移到 Kiro 原生 tool spec);
         // no_tool_available 占位也已移除 — 新 sanitize pipeline + normalizeToolHistory 已能处理空/未知 tool 场景.
         let toolsContext = {};
         if (tools && Array.isArray(tools) && tools.length > 0) {
-            const MAX_DESCRIPTION_LENGTH = reserve.adaptiveDesc
-                ? pickAdaptiveDescBudget(tools.filter(t => t.description?.trim()).length)
-                : 1024*8;
-            if (reserve.adaptiveDesc) {
-                logger.info(`[Kiro] Adaptive tool desc: ${tools.length} tools -> ${MAX_DESCRIPTION_LENGTH} chars/tool`);
-            }
-
-            // 截断白名单：这些工具的 description 中部含有关键安全/正确性约束（如 Bash 的 git 安全协议、
-            // NEVER skip hooks / NEVER force push 等），头尾保留策略会丢中部，因此对它们绕过截断。
-            // 名称完全匹配（大小写敏感）。
-            const TRUNCATION_WHITELIST = new Set([
-                'Bash',
-                'Write',
-                'Edit',
-                'Agent',
-                'Workflow'
-            ]);
-
-            let truncatedCount = 0;
-            let whitelistSkippedCount = 0;
-            const kiroTools = tools
-                .filter(tool => {
-                    if (!tool.description || tool.description.trim() === '') {
-                        logger.info(`[Kiro] Ignoring tool with empty description: ${tool.name}`);
-                        return false;
+            const kiroTools = tools.map(tool => ({
+                toolSpecification: {
+                    name: toolNameMaps.toKiroName(tool.name),
+                    description: tool.description || "",
+                    inputSchema: {
+                        json: tool.input_schema || {}
                     }
-                    return true;
-                })
-                .map(tool => {
-                    let desc = tool.description || "";
-                    const originalLength = desc.length;
-                    const isWhitelisted = TRUNCATION_WHITELIST.has(tool.name);
-
-                    if (desc.length > MAX_DESCRIPTION_LENGTH && isWhitelisted) {
-                        whitelistSkippedCount++;
-                        logger.info(`[Kiro] Whitelist: keeping tool '${tool.name}' description in full (${originalLength} chars, would have been truncated)`);
-                    } else if (desc.length > MAX_DESCRIPTION_LENGTH) {
-                        // 头 + 尾保留：工具描述的关键约束通常分布在开头（用途/总则）和结尾（边界规则），
-                        // 中部多为示例。该策略丢中部保两端，比简单 substring 截尾损失小。
-                        const placeholder = '\n\n...[omitted]...\n\n';
-                        const budget = MAX_DESCRIPTION_LENGTH - placeholder.length;
-                        const headLen = Math.floor(budget * 0.65);
-                        const tailLen = budget - headLen;
-                        let head = desc.slice(0, headLen);
-                        const lastNL = head.lastIndexOf('\n');
-                        if (lastNL > headLen * 0.8) head = head.slice(0, lastNL);
-                        let tail = desc.slice(desc.length - tailLen);
-                        const firstNL = tail.indexOf('\n');
-                        if (firstNL > 0 && firstNL < tailLen * 0.2) tail = tail.slice(firstNL + 1);
-                        desc = head + placeholder + tail;
-                        truncatedCount++;
-                        logger.info(`[Kiro] Truncated tool '${tool.name}' description (head+tail): ${originalLength} -> ${desc.length} chars`);
-                    }
-
-                    return {
-                        toolSpecification: {
-                            name: toolNameMaps.toKiroName(tool.name),
-                            description: desc,
-                            inputSchema: {
-                                json: tool.input_schema || {}
-                            }
-                        }
-                    };
-                });
-
-            if (truncatedCount > 0) {
-                logger.info(`[Kiro] Truncated ${truncatedCount} tool description(s) to max ${MAX_DESCRIPTION_LENGTH} chars (head+tail policy)`);
-            }
-            if (whitelistSkippedCount > 0) {
-                logger.info(`[Kiro] Skipped truncation for ${whitelistSkippedCount} whitelisted tool(s)`);
-            }
+                }
+            }));
 
             if (kiroTools.length > 0) {
                 // Phase 3.3: 在 tools 列表末尾追加 cachePoint 标记, 启用服务端 prompt cache.
@@ -2078,6 +2040,7 @@ async saveCredentialsToFile(filePath, newData) {
 
         // System prompt 作为 Human/AI pair 注入头部 (Kiro 0.12.x 缓存键稳定性)
         // 参考: translator.ts:733-749, 887-906
+        const maxTokensNote = maxTokensHint > 0 ? `\n\n**Do not exceed ${maxTokensHint} output tokens.**` : '';
         if (systemPrompt) {
             const timestamp = new Date().toISOString();
             const executionDirective = `
@@ -2091,7 +2054,7 @@ async saveCredentialsToFile(filePath, newData) {
 6. **完整交付**：直到所有任务步骤都执行完毕才算完成
 </execution_discipline>
 `;
-            const mutatedSystemPrompt = `[Context: Current time is ${timestamp}]\n\n${systemPrompt}\n\n${executionDirective}`;
+            const mutatedSystemPrompt = `[Context: Current time is ${timestamp}]\n\n${systemPrompt}\n\n${executionDirective}${maxTokensNote}`;
             kiroMessages.push({
                 userInputMessage: {
                     content: mutatedSystemPrompt,
@@ -2107,6 +2070,24 @@ async saveCredentialsToFile(filePath, newData) {
                     content: 'I will follow these instructions.'
                 }
             });
+        } else if (maxTokensNote) {
+            // 无 system_prompt 时，将 max_tokens 提示追加到最后一条 user message 末尾
+            const lastUserIdx = processedMessages.map(m => m.role).lastIndexOf('user');
+            if (lastUserIdx !== -1) {
+                const lastUser = processedMessages[lastUserIdx];
+                if (typeof lastUser.content === 'string') {
+                    processedMessages[lastUserIdx] = { ...lastUser, content: lastUser.content + maxTokensNote };
+                } else if (Array.isArray(lastUser.content)) {
+                    const parts = [...lastUser.content];
+                    const lastTextIdx = parts.map(p => p.type).lastIndexOf('text');
+                    if (lastTextIdx !== -1) {
+                        parts[lastTextIdx] = { ...parts[lastTextIdx], text: parts[lastTextIdx].text + maxTokensNote };
+                    } else {
+                        parts.push({ type: 'text', text: maxTokensNote.trim() });
+                    }
+                    processedMessages[lastUserIdx] = { ...lastUser, content: parts };
+                }
+            }
         }
 
         // 处理所有消息(含最后一条) → Kiro 格式
@@ -2122,23 +2103,17 @@ async saveCredentialsToFile(filePath, newData) {
                     origin: KIRO_CONSTANTS.ORIGIN_AI_EDITOR
                 };
                 let imageCount = 0;
+                let documentCount = 0;
                 let toolResults = [];
                 let images = [];
+                let documents = [];
 
                 if (Array.isArray(message.content)) {
                     for (const part of message.content) {
                         if (part.type === 'text') {
                             userInputMessage.content += part.text;
                         } else if (part.type === 'tool_result') {
-                            let trText = this.getContentText(part.content);
-                            if (reserve.truncateOn && trText.length > reserve.truncateMax) {
-                                const toolName = toolUseIdToName.get(part.tool_use_id) || '';
-                                const r = truncateHeadTailByTool(trText, reserve.truncateMax, toolName);
-                                if (r.truncated) {
-                                    logger.info(`[Kiro] Truncated tool_result (tool=${toolName}, ${trText.length} -> ${r.text.length})`);
-                                    trText = r.text;
-                                }
-                            }
+                            const trText = this.getContentText(part.content);
                             toolResults.push({
                                 content: [{ text: trText }],
                                 status: 'success',
@@ -2153,6 +2128,21 @@ async saveCredentialsToFile(filePath, newData) {
                             } else {
                                 imageCount++;
                             }
+                        } else if (part.type === 'document') {
+                            if (shouldKeepImages) {
+                                // Claude document block: source.type='base64', source.media_type, source.data
+                                // Kiro documents field: { name, format, source: { bytes } }
+                                const src = part.source || {};
+                                const mediaType = src.media_type || 'application/octet-stream';
+                                const format = mediaType.split('/')[1] || mediaType;
+                                documents.push({
+                                    name: part.title || `document_${documents.length + 1}`,
+                                    format,
+                                    source: { bytes: src.data }
+                                });
+                            } else {
+                                documentCount++;
+                            }
                         }
                     }
                 } else {
@@ -2164,6 +2154,21 @@ async saveCredentialsToFile(filePath, newData) {
                     if (distanceFromEnd > 0) {
                         logger.info(`[Kiro] Kept ${images.length} image(s) in recent history message (distance from end: ${distanceFromEnd})`);
                     }
+                }
+
+                if (documents.length > 0) {
+                    userInputMessage.documents = documents;
+                    if (distanceFromEnd > 0) {
+                        logger.info(`[Kiro] Kept ${documents.length} document(s) in recent history message (distance from end: ${distanceFromEnd})`);
+                    }
+                }
+
+                if (documentCount > 0) {
+                    const docPlaceholder = `[此消息包含 ${documentCount} 个文档，已在历史记录中省略]`;
+                    userInputMessage.content = userInputMessage.content
+                        ? `${userInputMessage.content}\n${docPlaceholder}`
+                        : docPlaceholder;
+                    logger.info(`[Kiro] Replaced ${documentCount} document(s) with placeholder in old history message (distance from end: ${distanceFromEnd})`);
                 }
 
                 if (imageCount > 0) {
@@ -2562,7 +2567,7 @@ async saveCredentialsToFile(filePath, newData) {
             throw new Error('No messages found in request body');
         }
 
-        const requestData = await this.buildCodewhispererRequest(messages, model, body.tools, body.system, body.thinking);
+        const requestData = await this.buildCodewhispererRequest(messages, model, body.tools, body.system, body.thinking, body.max_tokens || 0);
 
         try {
             const token = this.accessToken; // Use the already initialized token
@@ -3093,6 +3098,39 @@ async saveCredentialsToFile(filePath, newData) {
             } else {
                 contentForClaude = responseText;
             }
+
+            // max_tokens 截断：body 中明确指定了 max_tokens 时，截断 text 块（thinking 块不计入限制）。
+            // non-stream 模式上游已返回完整内容，无需断连，只需截断内容并修改 stop_reason。
+            const maxTokensLimit = (typeof requestBody?.max_tokens === 'number' && requestBody.max_tokens > 0)
+                ? requestBody.max_tokens : 0;
+            let nonStreamMaxTokensHit = false;
+            if (maxTokensLimit > 0) {
+                let textTokensUsed = 0;
+                if (Array.isArray(contentForClaude)) {
+                    contentForClaude = contentForClaude.map(block => {
+                        if (nonStreamMaxTokensHit) return block; // thinking 块保留原样
+                        if (block.type === 'text' && typeof block.text === 'string') {
+                            const blockTokens = this.countTextTokens(block.text);
+                            const remaining = maxTokensLimit - textTokensUsed;
+                            if (blockTokens > remaining) {
+                                nonStreamMaxTokensHit = true;
+                                return { ...block, text: truncateToTokenLimit(block.text, remaining, (t) => this.countTextTokens(t)) };
+                            }
+                            textTokensUsed += blockTokens;
+                        }
+                        return block;
+                    });
+                } else if (typeof contentForClaude === 'string') {
+                    const totalTokens = this.countTextTokens(contentForClaude);
+                    if (totalTokens > maxTokensLimit) {
+                        contentForClaude = truncateToTokenLimit(contentForClaude, maxTokensLimit, (t) => this.countTextTokens(t));
+                        nonStreamMaxTokensHit = true;
+                    }
+                }
+                if (nonStreamMaxTokensHit) {
+                    logger.info(`[Kiro] Non-stream max_tokens=${maxTokensLimit} hit, truncating response`);
+                }
+            }
             // 输出 token 估算: 用最终交付给客户端的内容
             let estOutputTokens = 0;
             if (Array.isArray(contentForClaude)) {
@@ -3110,20 +3148,37 @@ async saveCredentialsToFile(filePath, newData) {
                     if (tc?.function?.arguments) estOutputTokens += this.countTextTokens(tc.function.arguments);
                 }
             }
-            // [F3] 与流式 (claude-kiro.js:3912-3920) 同口径: 优先用上游 contextUsagePercentage 推 inputTokens,
-            // 否则回落到本地 estimateInputTokens。两条路径同分母, calculateCacheTokens 反算结果可比。
-            // 实测确认: contextUsagePercentage 只反映输入侧已用上下文, 不含本次 output, 故不减 estOutputTokens。
-            let inputTokens;
+            // contextUsagePercentage 用于 calculateCacheTokens 反算缓存分量（含历史缓存的完整上下文比例）。
+            // 汇报给客户端的 input_tokens 用本地 tokenizer 估算值，与 count_tokens 接口口径一致。
+            let ctxInputTokens;
             if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
                 const contextTokens = getContextTokensForModel(model, this.config, finalModel);
-                inputTokens = Math.round(contextTokens * contextUsagePercentage / 100);
-                logger.info(`[Kiro] Non-stream token calc from contextUsagePercentage: input=${inputTokens}, output=${estOutputTokens}`);
+                ctxInputTokens = Math.round(contextTokens * contextUsagePercentage / 100);
+                logger.info(`[Kiro] Non-stream ctx tokens from contextUsagePercentage: ctxInput=${ctxInputTokens}, output=${estOutputTokens}`);
             } else {
-                inputTokens = estimatedInputTokens;
+                ctxInputTokens = estimatedInputTokens;
             }
-            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, estOutputTokens, pricingModel);
+            // localInputTokens: 本地 tokenizer 估算值，与 count_tokens 口径一致，作为汇报给客户端的 input_tokens。
+            // max_tokens: 用于计算 _cr_limit 阈值。
+            const localInputTokens = estimatedInputTokens;
+            const maxTokens = requestBody?.max_tokens || 0;
+            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, ctxInputTokens, estOutputTokens, pricingModel, localInputTokens, maxTokens);
             const cacheTokens = { cacheCreationTokens, cacheReadTokens };
-            return this.buildClaudeResponse(contentForClaude, false, 'assistant', model, toolCalls, inputTokens, cacheTokens);
+            // stop_sequences 模拟：扫描完整输出，找到第一个匹配的序列后截断
+            let nonStreamStopReason = nonStreamMaxTokensHit ? 'max_tokens' : undefined;
+            let nonStreamStopSequenceHit = null;
+            const stopSequences = Array.isArray(requestBody?.stop_sequences) && requestBody.stop_sequences.length > 0
+                ? requestBody.stop_sequences : null;
+            if (!nonStreamMaxTokensHit && stopSequences) {
+                const truncResult = truncateAtStopSequence(contentForClaude, stopSequences);
+                if (truncResult.hit) {
+                    contentForClaude = truncResult.content;
+                    nonStreamStopReason = 'stop_sequence';
+                    nonStreamStopSequenceHit = truncResult.sequence;
+                    logger.info(`[Kiro] Non-stream stop_sequence="${truncResult.sequence}" hit, truncating response`);
+                }
+            }
+            return this.buildClaudeResponse(contentForClaude, false, 'assistant', model, toolCalls, localInputTokens, cacheTokens, nonStreamStopReason, nonStreamStopSequenceHit);
         } catch (error) {
             logger.error('[Kiro] Error in generateContent:', error);
             throw error;
@@ -3160,7 +3215,7 @@ async saveCredentialsToFile(filePath, newData) {
             throw new Error('No messages found in request body');
         }
 
-        const requestData = await this.buildCodewhispererRequest(messages, model, body.tools, body.system, body.thinking);
+        const requestData = await this.buildCodewhispererRequest(messages, model, body.tools, body.system, body.thinking, body.max_tokens || 0);
         const toolNameMaps = requestData._kiroToolNameMaps;
 
         const token = this.accessToken;
@@ -3483,10 +3538,9 @@ async saveCredentialsToFile(filePath, newData) {
         const finalModel = MODEL_MAPPING[model] ? model : model;
         logger.info(`[Kiro] Calling generateContentStream with model: ${finalModel} (real streaming)`);
 
-        let inputTokens = 0;
         let contextUsagePercentage = null;
         let meteringCredits = null;
-        const messageId = `${uuidv4()}`;
+        const messageId = `msg_${uuidv4().replace(/-/g, '')}`;
 
         const thinkingType = requestBody?.thinking?.type;
         const thinkingRequested = typeof thinkingType === 'string' &&
@@ -3640,6 +3694,19 @@ async saveCredentialsToFile(filePath, newData) {
             const toolUseBlockIndexes = new Map(); // toolUseId -> content block index
             let wasTruncated = false;  // 上游流是否被截断的多源 OR 信号
             let streamEndInfo = { bufferRemain: 0, socketAborted: false };
+            const maxTokensLimit = (typeof requestBody?.max_tokens === 'number' && requestBody.max_tokens > 0)
+                ? requestBody.max_tokens : 0;
+            let maxTokensHit = false;
+            let streamOutputTokenCount = 0; // 实时 output token 计数（仅 max_tokens 截断用）
+
+            // stop_sequences 模拟：流式模式
+            const stopSequences = Array.isArray(requestBody?.stop_sequences) && requestBody.stop_sequences.length > 0
+                ? requestBody.stop_sequences : null;
+            // 安全尾部长度 = 最长 stop sequence 长度 - 1，用于保留跨 chunk 检测窗口
+            const stopSeqSafeTail = stopSequences
+                ? Math.max(...stopSequences.map(s => s.length)) - 1 : 0;
+            let stopSeqAccum = ''; // 累积已输出给客户端的文本，用于跨 chunk 匹配
+            let stopSequenceHit = null; // 命中的 stop sequence
 
             const estimatedInputTokens = this.estimateInputTokens(requestBody);
 
@@ -3657,7 +3724,11 @@ async saveCredentialsToFile(filePath, newData) {
                         input_tokens: estimatedInputTokens,
                         output_tokens: 0,
                         cache_creation_input_tokens: 0,
-                        cache_read_input_tokens: 0
+                        cache_read_input_tokens: 0,
+                        cache_creation: {
+                            ephemeral_5m_input_tokens: 0,
+                            ephemeral_1h_input_tokens: 0
+                        }
                     },
                     content: []
                 }
@@ -3682,20 +3753,60 @@ async saveCredentialsToFile(filePath, newData) {
                 } else if (event.type === 'metering' && typeof event.credits === 'number') {
                     meteringCredits = event.credits;
                 } else if (event.type === 'content' && event.content) {
-                    totalContent += event.content;
+                    // max_tokens 截断：body 中明确指定了 max_tokens 时，实时统计已发出 token 数，
+                    // 超限则截取剩余可容纳的部分后立即 break，不再消费上游后续数据。
+                    let chunkToUse = event.content;
+                    if (maxTokensLimit > 0) {
+                        const chunkTokens = this.countTextTokens(event.content);
+                        if (streamOutputTokenCount + chunkTokens >= maxTokensLimit) {
+                            // 当前 chunk 超限：截取能填满配额的前缀部分
+                            const remaining = maxTokensLimit - streamOutputTokenCount;
+                            chunkToUse = remaining > 0
+                                ? truncateToTokenLimit(event.content, remaining, (t) => this.countTextTokens(t))
+                                : '';
+                            streamOutputTokenCount = maxTokensLimit;
+                            maxTokensHit = true;
+                        } else {
+                            streamOutputTokenCount += chunkTokens;
+                        }
+                    }
+                    if (chunkToUse) totalContent += chunkToUse;
 
                     if (!thinkingRequested) {
-                        streamState.buffer += event.content;
-                        // 确保不切断转义序列 \\n（如果以 \ 结尾，可能后面跟着 n）
-                        if (streamState.buffer.endsWith('\\')) {
-                            continue;
+                        if (chunkToUse) {
+                            streamState.buffer += chunkToUse;
+                            // 确保不切断转义序列 \\n（如果以 \ 结尾，可能后面跟着 n）
+                            if (!maxTokensHit && streamState.buffer.endsWith('\\')) {
+                                continue;
+                            }
+                            // stop_sequences 检测（跨 chunk：在安全尾部窗口中检查）
+                            if (stopSequences && !maxTokensHit) {
+                                const window = stopSeqAccum + streamState.buffer;
+                                const hitResult = findFirstStopSequence(window, stopSequences);
+                                if (hitResult !== null) {
+                                    // 命中：截取匹配点之前的内容（相对于 stopSeqAccum 偏移）
+                                    const cutPos = hitResult.index - stopSeqAccum.length;
+                                    const toEmit = cutPos > 0 ? streamState.buffer.slice(0, cutPos) : '';
+                                    streamState.buffer = '';
+                                    if (toEmit) {
+                                        yield* pushEvents(createTextDeltaEvents(toEmit));
+                                    }
+                                    stopSequenceHit = hitResult.sequence;
+                                    logger.info(`[Kiro Stream] stop_sequence="${hitResult.sequence}" hit, breaking stream`);
+                                    break;
+                                }
+                                // 保留安全尾部供下次检测
+                                const combined = stopSeqAccum + streamState.buffer;
+                                stopSeqAccum = stopSeqSafeTail > 0 ? combined.slice(-stopSeqSafeTail) : '';
+                            }
+                            yield* pushEvents(createTextDeltaEvents(streamState.buffer));
+                            streamState.buffer = '';
                         }
-                        yield* pushEvents(createTextDeltaEvents(streamState.buffer));
-                        streamState.buffer = '';
+                        if (maxTokensHit) break;
                         continue;
                     }
 
-                    streamState.buffer += event.content;
+                    streamState.buffer += chunkToUse;
                     const events = [];
 
                     while (streamState.buffer.length > 0) {
@@ -3794,7 +3905,51 @@ async saveCredentialsToFile(filePath, newData) {
                         }
                     }
 
+                    // stop_sequences 检测（thinking 模式下：扫描本批次 events 中的 text_delta）
+                    if (stopSequences && !maxTokensHit && !stopSequenceHit) {
+                        const textFromEvents = events
+                            .filter(e => e.type === 'content_block_delta' && e.delta?.type === 'text_delta')
+                            .map(e => e.delta.text)
+                            .join('');
+                        if (textFromEvents) {
+                            const window = stopSeqAccum + textFromEvents;
+                            const hitResult = findFirstStopSequence(window, stopSequences);
+                            if (hitResult !== null) {
+                                // 截断 events：保留 text_delta 中命中点之前的内容，丢弃之后的
+                                const cutInWindow = hitResult.index - stopSeqAccum.length;
+                                let textSoFar = 0;
+                                const truncatedEvents = [];
+                                for (const ev of events) {
+                                    if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+                                        const t = ev.delta.text;
+                                        if (textSoFar >= cutInWindow) break; // 已过截断点
+                                        const canTake = cutInWindow - textSoFar;
+                                        if (t.length <= canTake) {
+                                            truncatedEvents.push(ev);
+                                            textSoFar += t.length;
+                                        } else {
+                                            truncatedEvents.push({
+                                                ...ev,
+                                                delta: { ...ev.delta, text: t.slice(0, canTake) }
+                                            });
+                                            textSoFar += canTake;
+                                        }
+                                    } else {
+                                        truncatedEvents.push(ev);
+                                    }
+                                }
+                                stopSequenceHit = hitResult.sequence;
+                                logger.info(`[Kiro Stream] stop_sequence="${hitResult.sequence}" hit in thinking path, breaking stream`);
+                                yield* pushEvents(truncatedEvents);
+                                // 下面的 if (stopSequenceHit) break 会跳出 for await
+                            }
+                            const combined = stopSeqAccum + textFromEvents;
+                            stopSeqAccum = stopSeqSafeTail > 0 ? combined.slice(-stopSeqSafeTail) : '';
+                        }
+                    }
+
                     yield* pushEvents(events);
+                    if (maxTokensHit || stopSequenceHit) break;
                 } else if (event.type === 'reasoning' && event.text) {
                     // reasoningContentEvent: 根据客户端是否请求 thinking 来路由
                     if (thinkingRequested) {
@@ -3813,6 +3968,9 @@ async saveCredentialsToFile(filePath, newData) {
                 } else if (event.type === 'toolUse') {
                     const tc = event.toolUse;
                     const toolEvents = [];
+
+                    // 诊断：记录每个 toolUse 事件的关键字段，便于事后分析 ID 抖动 / 上游分片
+                    logger.debug(`[Kiro Stream] toolUse event id=${tc.toolUseId} name=${tc.name} inputLen=${(tc.input || '').length} stop=${!!tc.stop} prevId=${currentToolCall?.toolUseId} prevName=${currentToolCall?.name} prevInputLen=${currentToolCall?.input?.length ?? 0}`);
 
                     // 统计工具调用的内容到 totalContent（用于 token 计算）
                     if (tc.name) totalContent += tc.name;
@@ -3871,7 +4029,7 @@ async saveCredentialsToFile(filePath, newData) {
                                 index: blockIndex,
                                 content_block: {
                                     type: "tool_use",
-                                    id: tc.toolUseId || `tool_${uuidv4()}`,
+                                    id: (tc.toolUseId || `tool_${uuidv4()}`).replace(/^tooluse_/, 'toolu_'),
                                     name: tc.name,
                                     input: {}
                                 }
@@ -4079,61 +4237,70 @@ async saveCredentialsToFile(filePath, newData) {
                 logger.warn(`[Kiro Stream] output_tokens=${outputTokens} exceeds Claude Code soft limit (60K). Real long output or estimation drift.`);
             }
 
-            // 计算 input tokens
-            // 实测确认: contextUsagePercentage 只反映输入侧已用上下文，不含本次 output。
-            // 所以 contextTokens * pct / 100 换算出的就是 input tokens，不能再减 output。
+            // contextUsagePercentage 用于 calculateCacheTokens 反算缓存分量（含历史缓存的完整上下文比例）。
+            // 汇报给客户端的 input_tokens 用本地 tokenizer 估算值，与 count_tokens 接口口径一致。
+            let ctxInputTokens;
             if (contextUsagePercentage !== null && contextUsagePercentage > 0) {
                 const contextTokens = getContextTokensForModel(model, this.config, finalModel);
-                inputTokens = Math.round(contextTokens * contextUsagePercentage / 100);
+                ctxInputTokens = Math.round(contextTokens * contextUsagePercentage / 100);
             } else {
                 logger.warn('[Kiro Stream] contextUsagePercentage not received, using estimation');
-                inputTokens = estimatedInputTokens;
+                ctxInputTokens = estimatedInputTokens;
             }
 
             // 4. 反算缓存 token
             // 用映射前的客户端 model id 查价格表（映射后的 id 不在价格表里）。
-            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, inputTokens, outputTokens, pricingModel);
-            // Claude API 语义: total_input = input_tokens + cache_creation + cache_read
-            const nonCachedInputTokens = Math.max(0, inputTokens - cacheCreationTokens - cacheReadTokens);
+            // localInputTokens: 本地 tokenizer 估算值，与 count_tokens 口径一致，作为汇报给客户端的 input_tokens。
+            // max_tokens: 用于计算 _cr_limit 阈值。
+            const localInputTokens = estimatedInputTokens;
+            const maxTokens = requestBody?.max_tokens || 0;
+            const { cacheCreationTokens, cacheReadTokens } = calculateCacheTokens(meteringCredits, ctxInputTokens, outputTokens, pricingModel, localInputTokens, maxTokens);
+            // input_tokens 直接报 localInputTokens，不减 cache 分量（两者不共分母）。
+            const nonCachedInputTokens = localInputTokens;
 
             // cache_creation / cache_read 由 meteringCredits 反算得出（非 contextUsagePercentage）。
             // 反算结束后在此汇总输出全部 token 结果。
-            logger.info(`[Kiro] Token calculation from meteringCredits: input=${inputTokens}, output=${outputTokens}, cacheCreation=${cacheCreationTokens}, cacheRead=${cacheReadTokens}, nonCached=${nonCachedInputTokens}`);
+            logger.info(`[Kiro] Token calculation: localInput=${localInputTokens}, ctxInput=${ctxInputTokens}, output=${outputTokens}, cacheCreation=${cacheCreationTokens}, cacheRead=${cacheReadTokens}, nonCached=${nonCachedInputTokens}`);
 
             // 措施 1: 上下文压力膨胀（仅 message_delta）
             const reserve = getOutputReserveConfig(this.config);
             const inflationDelta = reserve.pressureFactor > 1.0
-                ? Math.max(1000, Math.round(inputTokens * (reserve.pressureFactor - 1)))
+                ? Math.max(1000, Math.round(localInputTokens * (reserve.pressureFactor - 1)))
                 : 0;
             const reportedNonCached = nonCachedInputTokens + inflationDelta;
             if (inflationDelta > 0) {
-                logger.info(`[Kiro Pressure] message_delta: realInput=${inputTokens} nonCached=${nonCachedInputTokens} reported=${reportedNonCached} delta=${inflationDelta}`);
+                logger.info(`[Kiro Pressure] message_delta: localInput=${localInputTokens} nonCached=${nonCachedInputTokens} reported=${reportedNonCached} delta=${inflationDelta}`);
             }
 
             // 5. 发送 message_delta 事件
-            // 重要：不要把上游截断 / thinking-only 报为 max_tokens，
-            // 否则 Claude Code 客户端会误判为输出超 64K 上限并弹错误对话框。
-            // 上游截断和 thinking-only 在语义上更接近自然结束 (end_turn) + 日志告警。
-            const stopReason = toolCalls.length > 0 ? "tool_use" : "end_turn";
-            if (wasTruncated && toolCalls.length === 0) {
+            // maxTokensHit: 请求方主动设置了 max_tokens 且系统已截断，报 "max_tokens"。
+            // 注意与上游自行截断(wasTruncated)的区别：上游截断仍报 end_turn（避免 Claude Code 64K 误报弹窗）。
+            const stopReason = stopSequenceHit ? "stop_sequence"
+                : maxTokensHit ? "max_tokens"
+                : toolCalls.length > 0 ? "tool_use" : "end_turn";
+            if (wasTruncated && !maxTokensHit && !stopSequenceHit && toolCalls.length === 0) {
                 logger.warn(`[Kiro Stream] Upstream truncated; reporting stop_reason=end_turn (avoid client 64K max_tokens error)`);
             }
             if (emittedOnlyThinking) {
                 logger.warn(`[Kiro Stream] Thinking-only response; reporting stop_reason=end_turn`);
             }
-            logger.info(`[Kiro Stream] STREAM_SUMMARY model=${finalModel} stopReason=${stopReason} truncated=${wasTruncated} bufferRemain=${streamEndInfo.bufferRemain} socketAborted=${streamEndInfo.socketAborted} toolCalls=${toolCalls.length} outTok=${outputTokens} visibleText=${streamState.hasVisibleText} thinkingOnly=${emittedOnlyThinking} thinkingExtracted=${streamState.thinkingExtracted} inThinkingAtEnd=${streamState.inThinking} ctxPct=${contextUsagePercentage} durMs=${Date.now() - streamStartMs}`);
+            logger.info(`[Kiro Stream] STREAM_SUMMARY model=${finalModel} stopReason=${stopReason} stopSequenceHit=${stopSequenceHit} maxTokensHit=${maxTokensHit} truncated=${wasTruncated} bufferRemain=${streamEndInfo.bufferRemain} socketAborted=${streamEndInfo.socketAborted} toolCalls=${toolCalls.length} outTok=${outputTokens} visibleText=${streamState.hasVisibleText} thinkingOnly=${emittedOnlyThinking} thinkingExtracted=${streamState.thinkingExtracted} inThinkingAtEnd=${streamState.inThinking} ctxPct=${contextUsagePercentage} durMs=${Date.now() - streamStartMs}`);
             if (!messageStartEmitted) {
                 yield messageStartEvent;
                 messageStartEmitted = true;
             }
             yield {
                 type: "message_delta",
-                delta: { stop_reason: stopReason },
+                delta: { stop_reason: stopReason, stop_sequence: stopSequenceHit ?? null },
                 usage: {
                     input_tokens: reportedNonCached,
                     output_tokens: outputTokens,
                     cache_creation_input_tokens: cacheCreationTokens,
-                    cache_read_input_tokens: cacheReadTokens
+                    cache_read_input_tokens: cacheReadTokens,
+                    cache_creation: {
+                        ephemeral_5m_input_tokens: cacheCreationTokens,
+                        ephemeral_1h_input_tokens: 0
+                    }
                 }
             };
 
@@ -4163,8 +4330,8 @@ async saveCredentialsToFile(filePath, newData) {
     /**
      * Build Claude compatible response object
      */
-    buildClaudeResponse(content, isStream = false, role = 'assistant', model, toolCalls = null, inputTokens = 0, cacheTokens = null) {
-        const messageId = `${uuidv4()}`;
+    buildClaudeResponse(content, isStream = false, role = 'assistant', model, toolCalls = null, inputTokens = 0, cacheTokens = null, stopReasonOverride = undefined, stopSequenceHit = null) {
+        const messageId = `msg_${uuidv4().replace(/-/g, '')}`;
 
         if (isStream) {
             // Kiro API is "pseudo-streaming", so we'll send a few events to simulate
@@ -4244,7 +4411,7 @@ async saveCredentialsToFile(filePath, newData) {
                         index: index,
                         content_block: {
                             type: "tool_use",
-                            id: tc.id,
+                            id: (tc.id || '').replace(/^tooluse_/, 'toolu_'),
                             name: tc.function.name,
                             input: {} // input is streamed via input_json_delta
                         }
@@ -4336,7 +4503,7 @@ async saveCredentialsToFile(filePath, newData) {
                     }
                     contentArray.push({
                         type: "tool_use",
-                        id: tc.id,
+                        id: (tc.id || '').replace(/^tooluse_/, 'toolu_'),
                         name: tc.function.name,
                         input: inputObject
                     });
@@ -4345,24 +4512,29 @@ async saveCredentialsToFile(filePath, newData) {
                 stopReason = "tool_use"; // Set stop_reason to "tool_use" when toolCalls exist
             }
 
+            // stopReasonOverride 优先级最高（如 max_tokens 主动截断），覆盖上面的推断值。
+            if (stopReasonOverride) stopReason = stopReasonOverride;
+
             if (hasThinkingContent && !hasTextContent && (!toolCalls || toolCalls.length === 0)) {
                 logger.warn('[Kiro] Thinking-only response in non-streaming mode; no fallback text injected, keeping stop_reason=end_turn');
                 // 不再设置 stopReason = "max_tokens"，避免 Claude Code 客户端误触发 64K 上限错误
             }
 
-            // Claude API 语义: total_input = input_tokens + cache_creation + cache_read
+            // input_tokens 直接报本轮 localInputTokens，不再减 cache 分量。
+            // cache_creation/cache_read 从 ctxInputTokens（含历史）反算，与 input_tokens 不共分母，相减无意义。
             const cacheCreationTokens = cacheTokens?.cacheCreationTokens || 0;
             const cacheReadTokens = cacheTokens?.cacheReadTokens || 0;
-            const reportedInput = cacheTokens
-                ? Math.max(0, inputTokens - cacheCreationTokens - cacheReadTokens)
-                : inputTokens;
             const usage = {
-                input_tokens: reportedInput,
+                input_tokens: inputTokens,
                 output_tokens: outputTokens
             };
             if (cacheTokens) {
                 usage.cache_creation_input_tokens = cacheCreationTokens;
                 usage.cache_read_input_tokens = cacheReadTokens;
+                usage.cache_creation = {
+                    ephemeral_5m_input_tokens: cacheCreationTokens,
+                    ephemeral_1h_input_tokens: 0
+                };
             }
 
             return {
@@ -4371,7 +4543,7 @@ async saveCredentialsToFile(filePath, newData) {
                 role: role,
                 model: model,
                 stop_reason: stopReason,
-                stop_sequence: null,
+                stop_sequence: stopSequenceHit ?? null,
                 usage,
                 content: contentArray
             };

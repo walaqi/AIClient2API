@@ -163,6 +163,7 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         CUSTOM_MODELS_FILE_PATH: null, // 自定义模型配置文件路径
         DETECTED_MODELS_FILE_PATH: null, // detect-models 探测缓存文件路径
         SYSTEM_PROMPT_REPLACEMENTS: [], // 系统提示词内容替换规则，例如: [{"old": "AI", "new": "Bot"}, {"old": "OpenAI", "new": "Gemini"}]
+        TOOL_DESCRIPTION_REPLACEMENTS: [], // 工具描述内容替换规则（仅作用于 tools[].description，与 SYSTEM_PROMPT_REPLACEMENTS 解耦）。格式同上。
         SCHEDULED_HEALTH_CHECK: {
             enabled: false,
             interval: 600000,
@@ -209,7 +210,7 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         { flag: '--port',                 configKey: 'SERVER_PORT',            type: 'int' },
         { flag: '--model-provider',       configKey: 'MODEL_PROVIDER',         type: 'string' },
         { flag: '--system-prompt-file',   configKey: 'SYSTEM_PROMPT_FILE_PATH', type: 'string' },
-        { flag: '--system-prompt-mode',   configKey: 'SYSTEM_PROMPT_MODE',     type: 'enum', validValues: ['overwrite', 'append'] },
+        { flag: '--system-prompt-mode',   configKey: 'SYSTEM_PROMPT_MODE',     type: 'enum', validValues: ['overwrite', 'append', 'head'] },
         { flag: '--host',                 configKey: 'HOST',                   type: 'string' },
         { flag: '--prompt-log-base-name', configKey: 'PROMPT_LOG_BASE_NAME',   type: 'string' },
         { flag: '--request-max-retries',  configKey: 'REQUEST_MAX_RETRIES',    type: 'int' },

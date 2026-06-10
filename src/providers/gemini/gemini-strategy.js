@@ -1,7 +1,7 @@
 import { API_ACTIONS, extractSystemPromptFromRequestBody, MODEL_PROTOCOL_PREFIX } from '../../utils/common.js';
 import logger from '../../utils/logger.js';
 import { ProviderStrategy } from '../../utils/provider-strategy.js';
-import { applySystemPromptReplacements } from '../../converters/utils.js';
+import { applySystemPromptReplacements, applyReplacementsToClientSystem, applyReplacementsToToolDescriptions } from '../../converters/utils.js';
 
 /**
  * Gemini provider strategy implementation.
@@ -38,6 +38,11 @@ class GeminiStrategy extends ProviderStrategy {
     }
 
     async applySystemPromptFromFile(config, requestBody) {
+        // Step 1: 无条件对客户端原始 system prompt 应用替换规则（与文件注入解耦）。
+        applyReplacementsToClientSystem(requestBody, config.SYSTEM_PROMPT_REPLACEMENTS, MODEL_PROTOCOL_PREFIX.GEMINI);
+        applyReplacementsToToolDescriptions(requestBody, config.TOOL_DESCRIPTION_REPLACEMENTS);
+
+        // Step 2: 走文件注入逻辑（仅在 SYSTEM_PROMPT_FILE_PATH/CONTENT 满足时生效）。
         if (!config.SYSTEM_PROMPT_FILE_PATH) {
             return requestBody;
         }
@@ -47,11 +52,16 @@ class GeminiStrategy extends ProviderStrategy {
             return requestBody;
         }
 
-        const existingSystemText = extractSystemPromptFromRequestBody(requestBody, MODEL_PROTOCOL_PREFIX.GEMINI);
+        const systemInstruction = requestBody.system_instruction || requestBody.systemInstruction;
+        const existingSystemText = systemInstruction?.parts
+            ? systemInstruction.parts.filter(p => p?.text).map(p => p.text).join('\n')
+            : '';
 
         const newSystemText = config.SYSTEM_PROMPT_MODE === 'append' && existingSystemText
             ? `${existingSystemText}\n${filePromptContent}`
-            : filePromptContent;
+            : config.SYSTEM_PROMPT_MODE === 'head' && existingSystemText
+                ? `${filePromptContent}\n${existingSystemText}`
+                : filePromptContent;
 
         // Apply system prompt replacements
         const finalSystemText = applySystemPromptReplacements(newSystemText, config.SYSTEM_PROMPT_REPLACEMENTS);
@@ -61,6 +71,7 @@ class GeminiStrategy extends ProviderStrategy {
             delete requestBody.system_instruction;
         }
         logger.info(`[System Prompt] Applied system prompt from ${config.SYSTEM_PROMPT_FILE_PATH} in '${config.SYSTEM_PROMPT_MODE}' mode for provider 'gemini'.`);
+        // TODO: set requestBody._injectedSystemTokens for count_tokens alignment — see claude-strategy.js for reference
 
         return requestBody;
     }
