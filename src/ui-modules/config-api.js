@@ -91,6 +91,7 @@ export async function handleGetConfig(req, res, currentConfig) {
         PROVIDER_POOLS_FILE_PATH: currentConfig.PROVIDER_POOLS_FILE_PATH,
         MAX_ERROR_COUNT: currentConfig.MAX_ERROR_COUNT,
         SYSTEM_PROMPT_REPLACEMENTS: currentConfig.SYSTEM_PROMPT_REPLACEMENTS,
+        TOOL_DESCRIPTION_REPLACEMENTS: currentConfig.TOOL_DESCRIPTION_REPLACEMENTS,
         WARMUP_TARGET: currentConfig.WARMUP_TARGET,
         REFRESH_CONCURRENCY_PER_PROVIDER: currentConfig.REFRESH_CONCURRENCY_PER_PROVIDER,
         providerFallbackChain: currentConfig.providerFallbackChain,
@@ -174,6 +175,11 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
         if (newConfig.SYSTEM_PROMPT_REPLACEMENTS !== undefined) {
             if (Array.isArray(newConfig.SYSTEM_PROMPT_REPLACEMENTS)) {
                 currentConfig.SYSTEM_PROMPT_REPLACEMENTS = newConfig.SYSTEM_PROMPT_REPLACEMENTS;
+            }
+        }
+        if (newConfig.TOOL_DESCRIPTION_REPLACEMENTS !== undefined) {
+            if (Array.isArray(newConfig.TOOL_DESCRIPTION_REPLACEMENTS)) {
+                currentConfig.TOOL_DESCRIPTION_REPLACEMENTS = newConfig.TOOL_DESCRIPTION_REPLACEMENTS;
             }
         }
         if (newConfig.PROMPT_LOG_BASE_NAME !== undefined) currentConfig.PROMPT_LOG_BASE_NAME = newConfig.PROMPT_LOG_BASE_NAME;
@@ -326,6 +332,7 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
                 SYSTEM_PROMPT_FILE_PATH: currentConfig.SYSTEM_PROMPT_FILE_PATH,
                 SYSTEM_PROMPT_MODE: currentConfig.SYSTEM_PROMPT_MODE,
                 SYSTEM_PROMPT_REPLACEMENTS: currentConfig.SYSTEM_PROMPT_REPLACEMENTS,
+                TOOL_DESCRIPTION_REPLACEMENTS: currentConfig.TOOL_DESCRIPTION_REPLACEMENTS,
                 PROMPT_LOG_BASE_NAME: currentConfig.PROMPT_LOG_BASE_NAME,
                 PROMPT_LOG_MODE: currentConfig.PROMPT_LOG_MODE,
                 REQUEST_MAX_RETRIES: currentConfig.REQUEST_MAX_RETRIES,
@@ -371,9 +378,6 @@ async function _handleUpdateConfig(req, res, currentConfig, body) {
                 GROK_USER_AGENT: currentConfig.GROK_USER_AGENT,
                 GROK_BASE_URL: currentConfig.GROK_BASE_URL,
                 OUTPUT_RESERVE_CONTEXT_PRESSURE: currentConfig.OUTPUT_RESERVE_CONTEXT_PRESSURE,
-                OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE: currentConfig.OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE,
-                OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS: currentConfig.OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS,
-                OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE: currentConfig.OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE,
                 KIRO_MODEL_CAPABILITIES: currentConfig.KIRO_MODEL_CAPABILITIES,
                 tokenBufferReserve: currentConfig.tokenBufferReserve
             };

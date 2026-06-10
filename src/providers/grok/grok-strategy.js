@@ -1,7 +1,7 @@
 import { API_ACTIONS, MODEL_PROTOCOL_PREFIX } from '../../utils/common.js';
 import logger from '../../utils/logger.js';
 import { ProviderStrategy } from '../../utils/provider-strategy.js';
-import { applySystemPromptReplacements } from '../../converters/utils.js';
+import { applySystemPromptReplacements, applyReplacementsToClientSystem, applyReplacementsToToolDescriptions } from '../../converters/utils.js';
 
 /**
  * Grok provider strategy implementation.
@@ -25,6 +25,13 @@ class GrokStrategy extends ProviderStrategy {
     }
 
     async applySystemPromptFromFile(config, requestBody) {
+        // Step 1: 无条件对客户端原始 system prompt 应用替换规则。
+        // Grok 协议没有独立 system 字段（system 已经被合并进 message），故此步实际为 no-op，
+        // 但保留调用以保持各 strategy 接口一致。
+        applyReplacementsToClientSystem(requestBody, config.SYSTEM_PROMPT_REPLACEMENTS, MODEL_PROTOCOL_PREFIX.GROK);
+        applyReplacementsToToolDescriptions(requestBody, config.TOOL_DESCRIPTION_REPLACEMENTS);
+
+        // Step 2: 走文件注入逻辑（仅在 SYSTEM_PROMPT_FILE_PATH/CONTENT 满足时生效）。
         if (!config.SYSTEM_PROMPT_FILE_PATH) {
             return requestBody;
         }

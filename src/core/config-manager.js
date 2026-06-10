@@ -163,6 +163,7 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         CUSTOM_MODELS_FILE_PATH: null, // 自定义模型配置文件路径
         DETECTED_MODELS_FILE_PATH: null, // detect-models 探测缓存文件路径
         SYSTEM_PROMPT_REPLACEMENTS: [], // 系统提示词内容替换规则，例如: [{"old": "AI", "new": "Bot"}, {"old": "OpenAI", "new": "Gemini"}]
+        TOOL_DESCRIPTION_REPLACEMENTS: [], // 工具描述内容替换规则（仅作用于 tools[].description，与 SYSTEM_PROMPT_REPLACEMENTS 解耦）。格式同上。
         SCHEDULED_HEALTH_CHECK: {
             enabled: false,
             interval: 600000,

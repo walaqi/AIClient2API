@@ -1,7 +1,7 @@
 import { ProviderStrategy } from '../../utils/provider-strategy.js';
 import logger from '../../utils/logger.js';
 import { extractSystemPromptFromRequestBody, MODEL_PROTOCOL_PREFIX } from '../../utils/common.js';
-import { applySystemPromptReplacements } from '../../converters/utils.js';
+import { applySystemPromptReplacements, applyReplacementsToClientSystem, applyReplacementsToToolDescriptions } from '../../converters/utils.js';
 
 /**
  * Forward provider strategy implementation.
@@ -43,6 +43,12 @@ class ForwardStrategy extends ProviderStrategy {
     }
 
     async applySystemPromptFromFile(config, requestBody) {
+        // Step 1: 无条件对客户端原始 system prompt 应用替换规则（与文件注入解耦）。
+        // Forward 协议透传 OpenAI 风格请求，按 OpenAI 形态替换 messages 中的 system/developer。
+        applyReplacementsToClientSystem(requestBody, config.SYSTEM_PROMPT_REPLACEMENTS, MODEL_PROTOCOL_PREFIX.OPENAI);
+        applyReplacementsToToolDescriptions(requestBody, config.TOOL_DESCRIPTION_REPLACEMENTS);
+
+        // Step 2: 走文件注入逻辑（仅在 SYSTEM_PROMPT_FILE_PATH/CONTENT 满足时生效）。
         if (!config.SYSTEM_PROMPT_FILE_PATH) {
             return requestBody;
         }

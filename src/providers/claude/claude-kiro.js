@@ -1258,40 +1258,7 @@ function getOutputReserveConfig(config) {
     let pressureFactor = Number.parseFloat(config?.OUTPUT_RESERVE_CONTEXT_PRESSURE);
     if (!Number.isFinite(pressureFactor) || pressureFactor < 1.0) pressureFactor = 1.0;
     else if (pressureFactor > 2.0) { pressureFactor = 2.0; }
-    const truncateOn = config?.OUTPUT_RESERVE_TOOL_RESULT_TRUNCATE === true;
-    let truncateMax = Number.parseInt(config?.OUTPUT_RESERVE_TOOL_RESULT_MAX_CHARS, 10);
-    if (!Number.isFinite(truncateMax) || truncateMax < 1024) truncateMax = 8192;
-    const adaptiveDesc = config?.OUTPUT_RESERVE_TOOL_DESC_ADAPTIVE === true;
-    return { pressureFactor, truncateOn, truncateMax, adaptiveDesc };
-}
-
-const TOOL_RESULT_RATIOS = { Read: 0.5, Bash: 0.25, Grep: 0.8, Glob: 0.8 };
-
-function truncateHeadTailByTool(text, maxLen, toolName) {
-    if (!text || text.length <= maxLen) return { text, truncated: false };
-    if (text.startsWith('data:image/') || text.startsWith('data:application/')) {
-        return { text, truncated: false };
-    }
-    const headRatio = TOOL_RESULT_RATIOS[toolName] ?? 0.6;
-    const placeholder = `\n\n...[omitted]...\n\n`;
-    const budget = Math.max(0, maxLen - placeholder.length);
-    const headLen = Math.floor(budget * headRatio);
-    const tailLen = budget - headLen;
-    return { text: text.slice(0, headLen) + placeholder + text.slice(-tailLen), truncated: true };
-}
-
-const ADAPTIVE_DESC_TABLE = [[5, 8192], [40, 4096], [90, 2048], [160, 1024]];
-
-function pickAdaptiveDescBudget(n) {
-    if (n <= ADAPTIVE_DESC_TABLE[0][0]) return ADAPTIVE_DESC_TABLE[0][1];
-    const last = ADAPTIVE_DESC_TABLE[ADAPTIVE_DESC_TABLE.length - 1];
-    if (n >= last[0]) return last[1];
-    for (let i = 0; i < ADAPTIVE_DESC_TABLE.length - 1; i++) {
-        const [n1, b1] = ADAPTIVE_DESC_TABLE[i];
-        const [n2, b2] = ADAPTIVE_DESC_TABLE[i + 1];
-        if (n >= n1 && n < n2) return Math.round(b1 + (n - n1) / (n2 - n1) * (b2 - b1));
-    }
-    return 8192;
+    return { pressureFactor };
 }
 
 /**
@@ -2042,109 +2009,22 @@ async saveCredentialsToFile(filePath, newData) {
         // 按 model-id 解析能力开关 (nativeThinking / contextCompression).
         const modelCaps = getKiroModelCapabilities(this.config, codewhispererModel, model);
 
-        // 措施 2/3: 获取输出预留配置.
-        // contextCompression=false 时跳过「工具结果截断」与「工具描述自适应缩短」两项压缩措施
-        // (高容量模型如 opus-4.7 上下文 1M, 无需为输出腾空间而压缩输入).
-        const reserve = getOutputReserveConfig(this.config);
-        if (!modelCaps.contextCompression) {
-            if (reserve.truncateOn || reserve.adaptiveDesc) {
-                logger.info(`[Kiro] contextCompression=false for ${codewhispererModel}: skipping tool_result truncate + adaptive tool desc`);
-            }
-            reserve.truncateOn = false;
-            reserve.adaptiveDesc = false;
-        }
-
-        // 措施 2: 构建 tool_use_id → 工具名映射（用于 tool_result 智能截断）
-        const toolUseIdToName = new Map();
-        if (reserve.truncateOn) {
-            for (const m of processedMessages) {
-                if (m.role !== 'assistant' || !Array.isArray(m.content)) continue;
-                for (const part of m.content) {
-                    if (part?.type === 'tool_use' && part.id && part.name) {
-                        toolUseIdToName.set(part.id, part.name);
-                    }
-                }
-            }
-        }
-
         // 相邻同 role 合并 已移除 — Phase 2.3 sanitize pipeline 的 ensureAlternatingMessages 处理
         const toolNameMaps = buildKiroToolNameMaps(tools);
-        
+
         // Phase 2.5: web_search/websearch 过滤已移除 (commit 3e071d4 已迁移到 Kiro 原生 tool spec);
         // no_tool_available 占位也已移除 — 新 sanitize pipeline + normalizeToolHistory 已能处理空/未知 tool 场景.
         let toolsContext = {};
         if (tools && Array.isArray(tools) && tools.length > 0) {
-            const MAX_DESCRIPTION_LENGTH = reserve.adaptiveDesc
-                ? pickAdaptiveDescBudget(tools.filter(t => t.description?.trim()).length)
-                : 1024*8;
-            if (reserve.adaptiveDesc) {
-                logger.info(`[Kiro] Adaptive tool desc: ${tools.length} tools -> ${MAX_DESCRIPTION_LENGTH} chars/tool`);
-            }
-
-            // 截断白名单：这些工具的 description 中部含有关键安全/正确性约束（如 Bash 的 git 安全协议、
-            // NEVER skip hooks / NEVER force push 等），头尾保留策略会丢中部，因此对它们绕过截断。
-            // 名称完全匹配（大小写敏感）。
-            const TRUNCATION_WHITELIST = new Set([
-                'Bash',
-                'Write',
-                'Edit',
-                'Agent',
-                'Workflow'
-            ]);
-
-            let truncatedCount = 0;
-            let whitelistSkippedCount = 0;
-            const kiroTools = tools
-                .filter(tool => {
-                    if (!tool.description || tool.description.trim() === '') {
-                        logger.info(`[Kiro] Ignoring tool with empty description: ${tool.name}`);
-                        return false;
+            const kiroTools = tools.map(tool => ({
+                toolSpecification: {
+                    name: toolNameMaps.toKiroName(tool.name),
+                    description: tool.description || "",
+                    inputSchema: {
+                        json: tool.input_schema || {}
                     }
-                    return true;
-                })
-                .map(tool => {
-                    let desc = tool.description || "";
-                    const originalLength = desc.length;
-                    const isWhitelisted = TRUNCATION_WHITELIST.has(tool.name);
-
-                    if (desc.length > MAX_DESCRIPTION_LENGTH && isWhitelisted) {
-                        whitelistSkippedCount++;
-                        logger.info(`[Kiro] Whitelist: keeping tool '${tool.name}' description in full (${originalLength} chars, would have been truncated)`);
-                    } else if (desc.length > MAX_DESCRIPTION_LENGTH) {
-                        // 头 + 尾保留：工具描述的关键约束通常分布在开头（用途/总则）和结尾（边界规则），
-                        // 中部多为示例。该策略丢中部保两端，比简单 substring 截尾损失小。
-                        const placeholder = '\n\n...[omitted]...\n\n';
-                        const budget = MAX_DESCRIPTION_LENGTH - placeholder.length;
-                        const headLen = Math.floor(budget * 0.65);
-                        const tailLen = budget - headLen;
-                        let head = desc.slice(0, headLen);
-                        const lastNL = head.lastIndexOf('\n');
-                        if (lastNL > headLen * 0.8) head = head.slice(0, lastNL);
-                        let tail = desc.slice(desc.length - tailLen);
-                        const firstNL = tail.indexOf('\n');
-                        if (firstNL > 0 && firstNL < tailLen * 0.2) tail = tail.slice(firstNL + 1);
-                        desc = head + placeholder + tail;
-                        truncatedCount++;
-                        logger.info(`[Kiro] Truncated tool '${tool.name}' description (head+tail): ${originalLength} -> ${desc.length} chars`);
-                    }
-
-                    return {
-                        toolSpecification: {
-                            name: toolNameMaps.toKiroName(tool.name),
-                            description: desc,
-                            inputSchema: {
-                                json: tool.input_schema || {}
-                            }
-                        }
-                    };
-                });
-
-            if (truncatedCount > 0) {
-                logger.info(`[Kiro] Truncated ${truncatedCount} tool description(s) to max ${MAX_DESCRIPTION_LENGTH} chars (head+tail policy)`);
-            }
-            if (whitelistSkippedCount > 0) {
-                logger.info(`[Kiro] Skipped truncation for ${whitelistSkippedCount} whitelisted tool(s)`);
-            }
+                }
+            }));
 
             if (kiroTools.length > 0) {
                 // Phase 3.3: 在 tools 列表末尾追加 cachePoint 标记, 启用服务端 prompt cache.
@@ -2233,15 +2113,7 @@ async saveCredentialsToFile(filePath, newData) {
                         if (part.type === 'text') {
                             userInputMessage.content += part.text;
                         } else if (part.type === 'tool_result') {
-                            let trText = this.getContentText(part.content);
-                            if (reserve.truncateOn && trText.length > reserve.truncateMax) {
-                                const toolName = toolUseIdToName.get(part.tool_use_id) || '';
-                                const r = truncateHeadTailByTool(trText, reserve.truncateMax, toolName);
-                                if (r.truncated) {
-                                    logger.info(`[Kiro] Truncated tool_result (tool=${toolName}, ${trText.length} -> ${r.text.length})`);
-                                    trText = r.text;
-                                }
-                            }
+                            const trText = this.getContentText(part.content);
                             toolResults.push({
                                 content: [{ text: trText }],
                                 status: 'success',
@@ -4096,6 +3968,9 @@ async saveCredentialsToFile(filePath, newData) {
                 } else if (event.type === 'toolUse') {
                     const tc = event.toolUse;
                     const toolEvents = [];
+
+                    // 诊断：记录每个 toolUse 事件的关键字段，便于事后分析 ID 抖动 / 上游分片
+                    logger.debug(`[Kiro Stream] toolUse event id=${tc.toolUseId} name=${tc.name} inputLen=${(tc.input || '').length} stop=${!!tc.stop} prevId=${currentToolCall?.toolUseId} prevName=${currentToolCall?.name} prevInputLen=${currentToolCall?.input?.length ?? 0}`);
 
                     // 统计工具调用的内容到 totalContent（用于 token 计算）
                     if (tc.name) totalContent += tc.name;

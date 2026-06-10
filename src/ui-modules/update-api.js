@@ -16,22 +16,6 @@ function buildGitHubApiCandidates(repo) {
     const apiPath = `repos/${repo}/tags`;
     return [
         {
-            name: 'gh-proxy.org',
-            url: `https://gh-proxy.org/https://api.github.com/${apiPath}`
-        },
-        {
-            name: 'hk.gh-proxy.org',
-            url: `https://hk.gh-proxy.org/https://api.github.com/${apiPath}`
-        },
-        {
-            name: 'cdn.gh-proxy.org',
-            url: `https://cdn.gh-proxy.org/https://api.github.com/${apiPath}`
-        },
-                {
-            name: 'edgeone.gh-proxy.org',
-            url: `https://edgeone.gh-proxy.org/https://api.github.com/${apiPath}`
-        },
-        {
             name: 'github-direct',
             url: `https://api.github.com/${apiPath}`
         }
@@ -42,24 +26,8 @@ function buildTarballCandidates(repo, tag) {
     const githubTarballPath = `${repo}/archive/refs/tags/${tag}.tar.gz`;
     return [
         {
-            name: 'gh-proxy.org',
-            url: `https://gh-proxy.org/https://github.com/${githubTarballPath}`
-        },
-        {
-            name: 'hk.gh-proxy.org',
-            url: `https://hk.gh-proxy.org/https://github.com/${githubTarballPath}`
-        },
-        {
-            name: 'cdn.gh-proxy.org',
-            url: `https://cdn.gh-proxy.org/https://github.com/${githubTarballPath}`
-        },
-        {
-            name: 'edgeone.gh-proxy.org',
-            url: `https://edgeone.gh-proxy.org/https://github.com/${githubTarballPath}`
-        },
-        {
-            name: 'gitclone.com',
-            url: `https://gitclone.com/github.com/${githubTarballPath}`
+            name: 'github-direct',
+            url: `https://github.com/${githubTarballPath}`
         }
     ];
 }
